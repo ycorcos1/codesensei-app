@@ -26,7 +26,6 @@ out/
 
 # AWS
 .aws-sam/
-samconfig.toml
 .terraform/
 *.tfstate
 *.tfstate.backup

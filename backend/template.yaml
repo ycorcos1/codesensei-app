@@ -1,0 +1,70 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: CodeSensei Backend - Health Check Skeleton
+
+Globals:
+  Function:
+    Runtime: nodejs18.x
+    Timeout: 30
+    MemorySize: 128
+    Environment:
+      Variables:
+        NODE_ENV: !Ref Environment
+        REGION: !Ref AWS::Region
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Environment name
+
+Resources:
+  CodeSenseiApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub 'CodeSensei-API-${Environment}'
+      StageName: !Ref Environment
+      Cors:
+        AllowMethods: "'GET,POST,PUT,PATCH,DELETE,OPTIONS'"
+        AllowHeaders: "'Content-Type,Authorization,X-Requested-With'"
+        AllowOrigin: "'*'"
+        AllowCredentials: false
+      Auth:
+        DefaultAuthorizer: NONE
+
+  HealthCheckFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'CodeSensei-HealthCheck-${Environment}'
+      CodeUri: src/health/
+      Handler: index.handler
+      Description: Health check endpoint for CodeSensei
+      Events:
+        HealthCheckApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CodeSenseiApi
+            Path: /health
+            Method: GET
+
+Outputs:
+  ApiUrl:
+    Description: API Gateway endpoint URL
+    Value: !Sub 'https://${CodeSenseiApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/'
+    Export:
+      Name: !Sub 'CodeSensei-ApiUrl-${Environment}'
+
+  HealthCheckEndpoint:
+    Description: Health check endpoint
+    Value: !Sub 'https://${CodeSenseiApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/health'
+
+  HealthCheckFunctionArn:
+    Description: Health check Lambda ARN
+    Value: !GetAtt HealthCheckFunction.Arn
+    Export:
+      Name: !Sub 'CodeSensei-HealthCheckFunction-${Environment}'
+
