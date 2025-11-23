@@ -134,7 +134,7 @@ function buildAuthCookies(accessToken, refreshToken) {
   const cookieOptions = {
     httpOnly: true,
     secure: true,
-    sameSite: 'Strict',
+    sameSite: 'None',
     path: '/',
   };
 
@@ -385,14 +385,14 @@ async function handleRefresh(event) {
     setCookie(ACCESS_COOKIE_NAME, accessToken, {
       httpOnly: true,
       secure: true,
-      sameSite: 'Strict',
+      sameSite: 'None',
       path: '/',
       maxAgeSeconds: ACCESS_MAX_AGE,
     }),
     setCookie(REFRESH_COOKIE_NAME, refreshToken, {
       httpOnly: true,
       secure: true,
-      sameSite: 'Strict',
+      sameSite: 'None',
       path: '/',
       maxAgeSeconds: REFRESH_MAX_AGE,
     }),

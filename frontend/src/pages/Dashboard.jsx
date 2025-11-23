@@ -86,6 +86,12 @@ export default function Dashboard() {
         setCursor(nextCursor ?? null);
         setHasMore(Boolean(nextCursor));
       } catch (err) {
+        // Handle 401 Unauthorized - token expired or invalid
+        if (err instanceof APIError && err.statusCode === 401) {
+          logout();
+          navigate('/login', { replace: true });
+          return;
+        }
         const message =
           err instanceof APIError
             ? err.message || 'Unable to load sessions.'
@@ -99,7 +105,7 @@ export default function Dashboard() {
         }
       }
     },
-    [],
+    [logout, navigate],
   );
 
   useEffect(() => {
