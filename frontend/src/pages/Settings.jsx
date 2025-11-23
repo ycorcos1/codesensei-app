@@ -15,7 +15,7 @@ export default function Settings() {
       <nav className="dashboard-nav">
         <div className="dashboard-brand">
           <img 
-            src="/codesensei-logo.png" 
+            src="/codesensei_logo.png" 
             alt="CodeSensei" 
             className="dashboard-logo"
           />

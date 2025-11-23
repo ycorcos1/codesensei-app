@@ -15,7 +15,7 @@
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', 'Roboto',
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", "Roboto",
     sans-serif;
   background-color: var(--dark-gray);
   color: var(--light-gray);
@@ -219,7 +219,7 @@ a:hover {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 20px 32px;
+  padding: 0 32px;
   background-color: var(--near-black);
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
@@ -237,13 +237,21 @@ a:hover {
 .dashboard-brand {
   display: flex;
   align-items: center;
+  margin: 0;
+  padding: 0;
 }
 
 .dashboard-logo {
-  height: 80px;
-  width: 300px;
+  height: 120px;
+  width: auto;
+  /* max-width: 600px; */
   object-fit: contain;
   display: block;
+  margin-left: 64px;
+  margin-top: 0;
+  margin-right: 0;
+  margin-bottom: 0;
+  padding: 0;
 }
 
 .dashboard-subtitle {
@@ -255,6 +263,7 @@ a:hover {
   display: flex;
   align-items: center;
   gap: 12px;
+  margin: 0;
 }
 
 .dashboard-header {
@@ -540,7 +549,7 @@ a:hover {
 
 .or-divider::before,
 .or-divider::after {
-  content: '';
+  content: "";
   flex: 1;
   height: 1px;
   background-color: rgba(255, 255, 255, 0.08);
@@ -678,6 +687,7 @@ a:hover {
   100% {
     background-position: -200% 0;
   }
+}
 
 @media (max-width: 768px) {
   .auth-card {

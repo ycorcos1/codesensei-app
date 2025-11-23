@@ -1,13 +1,18 @@
-import { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
-import NewSessionModal from '../components/NewSessionModal';
-import SessionTable from '../components/SessionTable';
-import { APIError, api } from '../utils/api';
-import { useAuth } from '../context/AuthContext';
+import NewSessionModal from "../components/NewSessionModal";
+import SessionTable from "../components/SessionTable";
+import { APIError, api } from "../utils/api";
+import { useAuth } from "../context/AuthContext";
 
 const getSessionId = (session) =>
-  session?.session_id ?? session?.id ?? session?._id ?? session?.uuid ?? session?.pk ?? null;
+  session?.session_id ??
+  session?.id ??
+  session?._id ??
+  session?.uuid ??
+  session?.pk ??
+  null;
 
 const normalizeSessionsResponse = (data) => {
   if (!data) {
@@ -19,11 +24,17 @@ const normalizeSessionsResponse = (data) => {
   }
 
   if (Array.isArray(data.sessions)) {
-    return { sessions: data.sessions, cursor: data.cursor ?? data.nextCursor ?? null };
+    return {
+      sessions: data.sessions,
+      cursor: data.cursor ?? data.nextCursor ?? null,
+    };
   }
 
   if (Array.isArray(data.items)) {
-    return { sessions: data.items, cursor: data.cursor ?? data.nextCursor ?? null };
+    return {
+      sessions: data.items,
+      cursor: data.cursor ?? data.nextCursor ?? null,
+    };
   }
 
   return { sessions: [], cursor: null };
@@ -38,7 +49,7 @@ export default function Dashboard() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [cursor, setCursor] = useState(null);
   const [hasMore, setHasMore] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
   const [showModal, setShowModal] = useState(false);
 
   const fetchSessions = useCallback(
@@ -50,9 +61,10 @@ export default function Dashboard() {
       }
 
       try {
-        setError('');
+        setError("");
         const response = await api.getSessions(cursorOverride);
-        const { sessions: incomingSessions, cursor: nextCursor } = normalizeSessionsResponse(response);
+        const { sessions: incomingSessions, cursor: nextCursor } =
+          normalizeSessionsResponse(response);
 
         setSessions((prev) => {
           if (!append) {
@@ -70,7 +82,7 @@ export default function Dashboard() {
             }
 
             const existingIndex = merged.findIndex(
-              (existing) => getSessionId(existing) === sessionIdentifier,
+              (existing) => getSessionId(existing) === sessionIdentifier
             );
 
             if (existingIndex >= 0) {
@@ -89,13 +101,13 @@ export default function Dashboard() {
         // Handle 401 Unauthorized - token expired or invalid
         if (err instanceof APIError && err.statusCode === 401) {
           logout();
-          navigate('/login', { replace: true });
+          navigate("/login", { replace: true });
           return;
         }
         const message =
           err instanceof APIError
-            ? err.message || 'Unable to load sessions.'
-            : 'Unable to load sessions. Please try again.';
+            ? err.message || "Unable to load sessions."
+            : "Unable to load sessions. Please try again.";
         setError(message);
       } finally {
         if (append) {
@@ -105,7 +117,7 @@ export default function Dashboard() {
         }
       }
     },
-    [logout, navigate],
+    [logout, navigate]
   );
 
   useEffect(() => {
@@ -114,7 +126,7 @@ export default function Dashboard() {
 
   const handleLogout = useCallback(async () => {
     await logout();
-    navigate('/login', { replace: true });
+    navigate("/login", { replace: true });
   }, [logout, navigate]);
 
   const handleOpenSession = useCallback(
@@ -127,30 +139,29 @@ export default function Dashboard() {
 
       navigate(`/editor/${sessionIdentifier}`);
     },
-    [navigate],
+    [navigate]
   );
 
-  const handleDeleteSession = useCallback(
-    async (session) => {
-      const sessionIdentifier = getSessionId(session);
+  const handleDeleteSession = useCallback(async (session) => {
+    const sessionIdentifier = getSessionId(session);
 
-      if (!sessionIdentifier) {
-        return;
-      }
+    if (!sessionIdentifier) {
+      return;
+    }
 
-      try {
-        await api.deleteSession(sessionIdentifier);
-        setSessions((prev) => prev.filter((item) => getSessionId(item) !== sessionIdentifier));
-      } catch (err) {
-        const message =
-          err instanceof APIError
-            ? err.message || 'Failed to delete session.'
-            : 'Failed to delete session. Please try again.';
-        setError(message);
-      }
-    },
-    [],
-  );
+    try {
+      await api.deleteSession(sessionIdentifier);
+      setSessions((prev) =>
+        prev.filter((item) => getSessionId(item) !== sessionIdentifier)
+      );
+    } catch (err) {
+      const message =
+        err instanceof APIError
+          ? err.message || "Failed to delete session."
+          : "Failed to delete session. Please try again.";
+      setError(message);
+    }
+  }, []);
 
   const handleLoadMore = useCallback(() => {
     if (!cursor || loadingMore) {
@@ -169,9 +180,9 @@ export default function Dashboard() {
     <div className="dashboard-page">
       <nav className="dashboard-nav">
         <div className="dashboard-brand">
-          <img 
-            src="/codesensei-logo.png" 
-            alt="CodeSensei" 
+          <img
+            src="/codesensei_logo.png"
+            alt="CodeSensei"
             className="dashboard-logo"
           />
         </div>
@@ -179,11 +190,15 @@ export default function Dashboard() {
           <button
             type="button"
             className="btn btn-primary btn-small"
-            onClick={() => navigate('/settings')}
+            onClick={() => navigate("/settings")}
           >
             Settings
           </button>
-          <button type="button" className="btn btn-secondary btn-small" onClick={handleLogout}>
+          <button
+            type="button"
+            className="btn btn-secondary btn-small"
+            onClick={handleLogout}
+          >
             Logout
           </button>
         </div>
@@ -194,7 +209,7 @@ export default function Dashboard() {
           <div>
             <h2>Your Sessions</h2>
             <p className="dashboard-welcome">
-              Welcome back, {user?.name || user?.username || 'there'}.
+              Welcome back, {user?.name || user?.username || "there"}.
             </p>
           </div>
           <button
