@@ -5,6 +5,7 @@ import Dashboard from "./pages/Dashboard";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import Settings from "./pages/Settings";
+import Editor from "./pages/Editor";
 
 function App() {
   return (
@@ -25,6 +26,14 @@ function App() {
         element={
           <ProtectedRoute>
             <Settings />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/editor/:sessionId"
+        element={
+          <ProtectedRoute>
+            <Editor />
           </ProtectedRoute>
         }
       />

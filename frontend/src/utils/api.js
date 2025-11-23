@@ -88,5 +88,16 @@ export const api = {
     request(`/sessions/${sessionId}`, {
       method: 'DELETE',
     }),
+
+  getSession: (sessionId) =>
+    request(`/sessions/${sessionId}`, {
+      method: 'GET',
+    }),
+
+  updateSession: (sessionId, payload) =>
+    request(`/sessions/${sessionId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
 };
 

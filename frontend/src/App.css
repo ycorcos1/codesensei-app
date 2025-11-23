@@ -740,3 +740,145 @@ a:hover {
     padding: 20px;
   }
 }
+
+/* ============================================
+   Editor page
+   ============================================ */
+
+.editor-page {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background-color: var(--near-black);
+  color: var(--light-gray);
+  overflow: hidden;
+}
+
+.editor-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 24px;
+  background-color: var(--near-black);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  height: 60px;
+  flex-shrink: 0;
+}
+
+.editor-nav-left {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+.editor-logo {
+  height: 48px;
+  width: auto;
+  object-fit: contain;
+}
+
+.editor-filename {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.filename-text {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--light-gray);
+}
+
+.unsaved-indicator {
+  color: var(--blood-orange);
+  font-size: 20px;
+  line-height: 1;
+}
+
+.editor-nav-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.editor-error-banner {
+  background-color: rgba(220, 38, 38, 0.16);
+  border-bottom: 1px solid rgba(220, 38, 38, 0.45);
+  color: var(--error-red);
+  padding: 12px 24px;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.editor-workspace {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.editor-container {
+  flex: 1;
+  overflow: hidden;
+  background-color: var(--near-black);
+}
+
+.thread-panel-placeholder {
+  width: 450px;
+  background-color: var(--dark-gray);
+  border-left: 1px solid rgba(255, 255, 255, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.placeholder-text {
+  color: var(--dim-gray);
+  font-size: 14px;
+  font-style: italic;
+}
+
+.error-state {
+  text-align: center;
+  padding: 32px;
+}
+
+.error-message {
+  color: var(--error-red);
+  font-size: 16px;
+  margin-bottom: 24px;
+}
+
+@media (max-width: 1024px) {
+  .thread-panel-placeholder {
+    display: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .editor-nav {
+    padding: 12px 16px;
+    height: auto;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .editor-nav-left,
+  .editor-nav-right {
+    gap: 8px;
+  }
+
+  .editor-logo {
+    height: 36px;
+  }
+
+  .filename-text {
+    font-size: 14px;
+  }
+
+  .editor-nav-right {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+}
