@@ -5,12 +5,81 @@ import Editor from '@monaco-editor/react';
 import { api, APIError } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 
+const LANGUAGE_OPTIONS = [
+  'JavaScript',
+  'TypeScript',
+  'Python',
+  'Java',
+  'Go',
+  'Rust',
+  'C++',
+  'C',
+  'C#',
+  'PHP',
+  'Ruby',
+  'HTML',
+  'CSS',
+  'SQL',
+  'JSON',
+  'YAML',
+  'Markdown',
+  'Shell',
+  'Plain Text',
+];
+
+const DEFAULT_LANGUAGE = 'Plain Text';
+
+const LANGUAGE_TO_MONACO = {
+  JavaScript: 'javascript',
+  TypeScript: 'typescript',
+  Python: 'python',
+  Java: 'java',
+  Go: 'go',
+  Rust: 'rust',
+  'C++': 'cpp',
+  C: 'c',
+  'C#': 'csharp',
+  PHP: 'php',
+  Ruby: 'ruby',
+  HTML: 'html',
+  CSS: 'css',
+  SQL: 'sql',
+  JSON: 'json',
+  YAML: 'yaml',
+  Markdown: 'markdown',
+  Shell: 'shell',
+  'Plain Text': 'plaintext',
+};
+
+function normalizeLanguageName(rawValue) {
+  if (!rawValue || typeof rawValue !== 'string') {
+    return DEFAULT_LANGUAGE;
+  }
+
+  const trimmed = rawValue.trim();
+  if (!trimmed) {
+    return DEFAULT_LANGUAGE;
+  }
+
+  const matchedOption = LANGUAGE_OPTIONS.find(
+    (option) => option.toLowerCase() === trimmed.toLowerCase(),
+  );
+
+  return matchedOption || DEFAULT_LANGUAGE;
+}
+
+function getMonacoLanguage(languageName) {
+  const normalized = normalizeLanguageName(languageName);
+  return LANGUAGE_TO_MONACO[normalized] || 'plaintext';
+}
+
 export default function EditorPage() {
   const { sessionId } = useParams();
   const navigate = useNavigate();
   const { logout } = useAuth();
 
   const editorRef = useRef(null);
+  const monacoRef = useRef(null);
   const leaveActionRef = useRef(null);
   const editorUrlRef = useRef(window.location.href);
 
@@ -25,6 +94,8 @@ export default function EditorPage() {
   const [nameDirty, setNameDirty] = useState(false);
   const [nameSaving, setNameSaving] = useState(false);
   const [showLeaveModal, setShowLeaveModal] = useState(false);
+  const [selectedLanguage, setSelectedLanguage] = useState(DEFAULT_LANGUAGE);
+  const [languageSaving, setLanguageSaving] = useState(false);
 
   const normalizeSessionResponse = useCallback(
     (payload) => payload?.session ?? payload ?? null,
@@ -32,15 +103,8 @@ export default function EditorPage() {
   );
 
   const derivedLanguage = useMemo(() => {
-    if (!session) {
-      return 'plaintext';
-    }
-    return (
-      session.language_override ||
-      session.language_detected ||
-      'plaintext'
-    );
-  }, [session]);
+    return getMonacoLanguage(selectedLanguage);
+  }, [selectedLanguage]);
 
   const hasPendingChanges = useMemo(
     () => Boolean(isDirty || nameDirty),
@@ -90,6 +154,18 @@ export default function EditorPage() {
 
     fetchSession();
   }, [sessionId, logout, navigate, normalizeSessionResponse]);
+
+  useEffect(() => {
+    if (!session) {
+      setSelectedLanguage(DEFAULT_LANGUAGE);
+      return;
+    }
+
+    const sessionLanguage =
+      session.language_override || session.language_detected;
+
+    setSelectedLanguage(normalizeLanguageName(sessionLanguage));
+  }, [session]);
 
   const handleSave = useCallback(async () => {
     if (!sessionId || !session || saving) {
@@ -159,8 +235,9 @@ export default function EditorPage() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleSave]);
 
-  const handleEditorDidMount = useCallback((editorInstance) => {
+  const handleEditorDidMount = useCallback((editorInstance, monacoInstance) => {
     editorRef.current = editorInstance;
+    monacoRef.current = monacoInstance;
   }, []);
 
   const handleEditorChange = useCallback(
@@ -211,6 +288,92 @@ export default function EditorPage() {
     },
     [hasPendingChanges],
   );
+
+  const handleLanguageChange = useCallback(
+    async (event) => {
+      const nextLanguage = normalizeLanguageName(event.target.value);
+      const previousLanguage =
+        normalizeLanguageName(selectedLanguage) || DEFAULT_LANGUAGE;
+
+      setSelectedLanguage(nextLanguage);
+
+      if (!sessionId || !session) {
+        return;
+      }
+
+      if (!session.version_number) {
+        setError(
+          'Unable to update the language because the session metadata is out of sync. Please reload and try again.',
+        );
+        setSelectedLanguage(previousLanguage);
+        return;
+      }
+
+      const currentSessionLanguage = normalizeLanguageName(
+        session.language_override || session.language_detected,
+      );
+
+      if (nextLanguage === currentSessionLanguage) {
+        return;
+      }
+
+      try {
+        setLanguageSaving(true);
+        setError('');
+
+        const payload = {
+          language_override: nextLanguage,
+          expected_version_number: session.version_number,
+        };
+
+        const response = await api.updateSession(sessionId, payload);
+        const updatedSession = normalizeSessionResponse(response);
+
+        setSession((prev) => {
+          if (!prev) {
+            return prev;
+          }
+
+          return {
+            ...prev,
+            ...(updatedSession || {}),
+            language_override: nextLanguage,
+          };
+        });
+      } catch (err) {
+        setSelectedLanguage(previousLanguage);
+        const message =
+          err instanceof APIError
+            ? err.message || 'Failed to update language.'
+            : 'Failed to update language. Please try again.';
+        setError(message);
+      } finally {
+        setLanguageSaving(false);
+      }
+    },
+    [sessionId, session, selectedLanguage, normalizeSessionResponse],
+  );
+
+  useEffect(() => {
+    const monaco = monacoRef.current;
+    const editorInstance = editorRef.current;
+
+    if (!monaco || !editorInstance) {
+      return;
+    }
+
+    const model = editorInstance.getModel();
+    if (!model) {
+      return;
+    }
+
+    const targetLanguage = getMonacoLanguage(selectedLanguage);
+    const currentLanguage = model.getLanguageId();
+
+    if (currentLanguage !== targetLanguage) {
+      monaco.editor.setModelLanguage(model, targetLanguage);
+    }
+  }, [selectedLanguage]);
 
   const handleStayOnPage = useCallback(() => {
     leaveActionRef.current = null;
@@ -360,6 +523,30 @@ export default function EditorPage() {
           </div>
         </div>
         <div className="editor-nav-right">
+          <div className="language-picker">
+            <label htmlFor="editor-language-select" className="sr-only">
+              Select programming language
+            </label>
+            <select
+              id="editor-language-select"
+              className="language-dropdown"
+              value={selectedLanguage}
+              onChange={handleLanguageChange}
+              disabled={languageSaving || saving || loading}
+              aria-label="Programming language selector"
+            >
+              {LANGUAGE_OPTIONS.map((languageOption) => (
+                <option key={languageOption} value={languageOption}>
+                  {languageOption}
+                </option>
+              ))}
+            </select>
+            {languageSaving ? (
+              <span className="language-saving-indicator" aria-live="polite">
+                Saving...
+              </span>
+            ) : null}
+          </div>
           <button
             type="button"
             className={`btn btn-small ${
