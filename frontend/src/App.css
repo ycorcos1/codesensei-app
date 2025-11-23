@@ -236,13 +236,14 @@ a:hover {
 
 .dashboard-brand {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  align-items: center;
+  gap: 12px;
 }
 
-.dashboard-brand h1 {
-  font-size: 20px;
-  font-weight: 600;
+.dashboard-logo {
+  height: 40px;
+  width: auto;
+  display: block;
 }
 
 .dashboard-subtitle {
@@ -391,8 +392,16 @@ a:hover {
 }
 
 .empty-state-icon {
-  font-size: 72px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
   margin-bottom: 24px;
+}
+
+.empty-state-icon svg {
+  color: var(--blood-orange);
+  width: 96px;
+  height: 96px;
 }
 
 .empty-state h3 {

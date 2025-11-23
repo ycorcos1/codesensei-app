@@ -169,14 +169,18 @@ export default function Dashboard() {
     <div className="dashboard-page">
       <nav className="dashboard-nav">
         <div className="dashboard-brand">
-          <h1>CodeSensei</h1>
+          <img 
+            src="/codesensei-logo.png" 
+            alt="CodeSensei" 
+            className="dashboard-logo"
+          />
           <span className="dashboard-subtitle">Inline AI code review sessions</span>
         </div>
         <div className="dashboard-nav-actions">
           <button
             type="button"
             className="btn btn-primary btn-small"
-            onClick={() => setShowModal(true)}
+            onClick={() => navigate('/settings')}
           >
             New Session
           </button>
