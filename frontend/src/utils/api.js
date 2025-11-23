@@ -70,5 +70,23 @@ export const api = {
     request('/auth/refresh', {
       method: 'POST',
     }),
+
+  getSessions: (cursor) => {
+    const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
+    return request(`/sessions${query}`, {
+      method: 'GET',
+    });
+  },
+
+  createSession: (payload) =>
+    request('/sessions', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  deleteSession: (sessionId) =>
+    request(`/sessions/${sessionId}`, {
+      method: 'DELETE',
+    }),
 };
 
