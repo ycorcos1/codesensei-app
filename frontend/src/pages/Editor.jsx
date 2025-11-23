@@ -11,6 +11,8 @@ export default function EditorPage() {
   const { logout } = useAuth();
 
   const editorRef = useRef(null);
+  const leaveActionRef = useRef(null);
+  const editorUrlRef = useRef(window.location.href);
 
   const [session, setSession] = useState(null);
   const [code, setCode] = useState('');
@@ -22,6 +24,7 @@ export default function EditorPage() {
   const [lastSavedContent, setLastSavedContent] = useState('');
   const [nameDirty, setNameDirty] = useState(false);
   const [nameSaving, setNameSaving] = useState(false);
+  const [showLeaveModal, setShowLeaveModal] = useState(false);
 
   const normalizeSessionResponse = useCallback(
     (payload) => payload?.session ?? payload ?? null,
@@ -38,6 +41,11 @@ export default function EditorPage() {
       'plaintext'
     );
   }, [session]);
+
+  const hasPendingChanges = useMemo(
+    () => Boolean(isDirty || nameDirty),
+    [isDirty, nameDirty],
+  );
 
   useEffect(() => {
     async function fetchSession() {
@@ -164,18 +172,65 @@ export default function EditorPage() {
     [lastSavedContent],
   );
 
-  const handleLogout = useCallback(async () => {
-    await logout();
-    navigate('/login', { replace: true });
-  }, [logout, navigate]);
+  useEffect(() => {
+    const handleBeforeUnload = (event) => {
+      if (!hasPendingChanges) {
+        return;
+      }
+      event.preventDefault();
+      event.returnValue = '';
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasPendingChanges]);
+
+  useEffect(() => {
+    const handlePopState = (event) => {
+      if (!hasPendingChanges) {
+        return;
+      }
+      event.preventDefault();
+      window.history.pushState(null, '', editorUrlRef.current);
+      leaveActionRef.current = () => navigate(-1);
+      setShowLeaveModal(true);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [hasPendingChanges, navigate]);
+
+  const requestNavigation = useCallback(
+    (action) => {
+      if (hasPendingChanges) {
+        leaveActionRef.current = action;
+        setShowLeaveModal(true);
+      } else {
+        action();
+      }
+    },
+    [hasPendingChanges],
+  );
+
+  const handleStayOnPage = useCallback(() => {
+    leaveActionRef.current = null;
+    setShowLeaveModal(false);
+  }, []);
+
+  const handleConfirmLeave = useCallback(() => {
+    setShowLeaveModal(false);
+    setIsDirty(false);
+    setNameDirty(false);
+    const pendingAction = leaveActionRef.current;
+    leaveActionRef.current = null;
+    if (pendingAction) {
+      pendingAction();
+    }
+  }, []);
 
   const handleNavigateToDashboard = useCallback(() => {
-    navigate('/dashboard');
-  }, [navigate]);
-
-  const handleNavigateToSettings = useCallback(() => {
-    navigate('/settings');
-  }, [navigate]);
+    requestNavigation(() => navigate('/dashboard'));
+  }, [navigate, requestNavigation]);
 
   const handleNameChange = useCallback((event) => {
     setSessionName(event.target.value);
@@ -287,6 +342,11 @@ export default function EditorPage() {
             className="editor-logo"
           />
           <div className="editor-filename">
+            {hasPendingChanges ? (
+              <span className="unsaved-indicator" title="Unsaved changes">
+                &#x25cf;
+              </span>
+            ) : null}
             <input
               className="editor-filename-input"
               value={sessionName}
@@ -297,11 +357,6 @@ export default function EditorPage() {
               disabled={nameSaving}
               aria-label="Session name"
             />
-            {isDirty || nameDirty ? (
-              <span className="unsaved-indicator" title="Unsaved changes">
-                &#x25cf;
-              </span>
-            ) : null}
           </div>
         </div>
         <div className="editor-nav-right">
@@ -321,20 +376,6 @@ export default function EditorPage() {
             onClick={handleNavigateToDashboard}
           >
             Dashboard
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary btn-small"
-            onClick={handleNavigateToSettings}
-          >
-            Settings
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary btn-small"
-            onClick={handleLogout}
-          >
-            Logout
           </button>
         </div>
       </nav>
@@ -369,6 +410,41 @@ export default function EditorPage() {
           <p className="placeholder-text">Thread panel coming soon...</p>
         </aside>
       </div>
+
+      {showLeaveModal ? (
+        <div className="modal-overlay" role="dialog" aria-modal="true">
+          <div className="modal-card">
+            <button
+              type="button"
+              className="modal-close"
+              onClick={handleStayOnPage}
+              aria-label="Close modal"
+            >
+              ×
+            </button>
+            <h2 className="modal-title">Leave without saving?</h2>
+            <p>
+              You have unsaved changes in this session. Leaving now will discard them.
+            </p>
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={handleStayOnPage}
+              >
+                Stay on page
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleConfirmLeave}
+              >
+                Discard changes
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
