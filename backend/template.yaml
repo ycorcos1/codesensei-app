@@ -165,6 +165,64 @@ Resources:
             Path: /users/me
             Method: DELETE
 
+  SessionsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'CodeSensei-Sessions-${Environment}'
+      CodeUri: src/sessions/
+      Handler: index.handler
+      Description: Session management endpoints for CodeSensei
+      MemorySize: 512
+      Timeout: 30
+      Environment:
+        Variables:
+          SESSION_SAVE_RATE_LIMIT_PER_MINUTE: '60'
+          SESSION_CREATE_RATE_LIMIT_PER_MINUTE: '20'
+          MAX_SESSIONS_PER_USER: '100'
+          MAX_SESSION_CODE_BYTES: '5242880'
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SessionsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RateLimitsTable
+      Events:
+        ListSessions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CodeSenseiApi
+            Path: /sessions
+            Method: GET
+        CreateSession:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CodeSenseiApi
+            Path: /sessions
+            Method: POST
+        GetSession:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CodeSenseiApi
+            Path: /sessions/{id}
+            Method: GET
+        UpdateSession:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CodeSenseiApi
+            Path: /sessions/{id}
+            Method: PUT
+        UpdateSessionMetadata:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CodeSenseiApi
+            Path: /sessions/{id}/metadata
+            Method: PATCH
+        DeleteSession:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CodeSenseiApi
+            Path: /sessions/{id}
+            Method: DELETE
+
   UsersTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -311,6 +369,12 @@ Outputs:
     Value: !GetAtt UsersFunction.Arn
     Export:
       Name: !Sub 'CodeSensei-UsersFunction-${Environment}'
+
+  SessionsFunctionArn:
+    Description: Sessions Lambda function ARN
+    Value: !GetAtt SessionsFunction.Arn
+    Export:
+      Name: !Sub 'CodeSensei-SessionsFunction-${Environment}'
 
   UsersTableName:
     Description: Users DynamoDB table name

@@ -27,11 +27,12 @@ function getCallerIp(event) {
   );
 }
 
-async function assertWithinRateLimit(event, endpointKey) {
+async function assertWithinRateLimit(event, endpointKey, limitOverride) {
   if (!RATE_LIMITS_TABLE) {
     return true;
   }
 
+  const limit = limitOverride || AUTH_RATE_LIMIT;
   const ip = getCallerIp(event);
   const now = Date.now();
   const window = Math.floor(now / 60000); // per minute window
@@ -73,7 +74,7 @@ async function assertWithinRateLimit(event, endpointKey) {
         },
         ExpressionAttributeValues: {
           ':inc': 1,
-          ':limit': AUTH_RATE_LIMIT,
+          ':limit': limit,
         },
       })
     );
