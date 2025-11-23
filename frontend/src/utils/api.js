@@ -99,5 +99,11 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(payload),
     }),
+
+  updateSessionMetadata: (sessionId, payload) =>
+    request(`/sessions/${sessionId}/metadata`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
 };
 

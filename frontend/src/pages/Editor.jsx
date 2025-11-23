@@ -14,11 +14,19 @@ export default function EditorPage() {
 
   const [session, setSession] = useState(null);
   const [code, setCode] = useState('');
+  const [sessionName, setSessionName] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [isDirty, setIsDirty] = useState(false);
   const [lastSavedContent, setLastSavedContent] = useState('');
+  const [nameDirty, setNameDirty] = useState(false);
+  const [nameSaving, setNameSaving] = useState(false);
+
+  const normalizeSessionResponse = useCallback(
+    (payload) => payload?.session ?? payload ?? null,
+    [],
+  );
 
   const derivedLanguage = useMemo(() => {
     if (!session) {
@@ -42,13 +50,16 @@ export default function EditorPage() {
       try {
         setLoading(true);
         setError('');
-        const data = await api.getSession(sessionId);
-        const initialCode = data?.code_content ?? '';
+        const response = await api.getSession(sessionId);
+        const fetchedSession = normalizeSessionResponse(response);
+        const initialCode = fetchedSession?.code_content ?? '';
 
-        setSession(data);
+        setSession(fetchedSession);
+        setSessionName(fetchedSession?.filename || '');
         setCode(initialCode);
         setLastSavedContent(initialCode);
         setIsDirty(false);
+        setNameDirty(false);
       } catch (err) {
         if (err instanceof APIError && err.statusCode === 401) {
           await logout();
@@ -70,10 +81,17 @@ export default function EditorPage() {
     }
 
     fetchSession();
-  }, [sessionId, logout, navigate]);
+  }, [sessionId, logout, navigate, normalizeSessionResponse]);
 
   const handleSave = useCallback(async () => {
-    if (!session || saving) {
+    if (!sessionId || !session || saving) {
+      return;
+    }
+
+    if (!session.version_number) {
+      setError(
+        'Unable to save changes because the session metadata is out of sync. Please reload the page and try again.',
+      );
       return;
     }
 
@@ -88,12 +106,16 @@ export default function EditorPage() {
         expected_version_number: session.version_number,
       };
 
-      const updatedSession = await api.updateSession(sessionId, payload);
-      const nextCode = updatedSession?.code_content ?? currentCode;
+      const response = await api.updateSession(sessionId, payload);
+      const updatedSession = normalizeSessionResponse(response);
 
-      setSession(updatedSession);
-      setCode(nextCode);
-      setLastSavedContent(nextCode);
+      setSession((prev) => ({
+        ...(prev || {}),
+        ...(updatedSession || {}),
+        code_content: currentCode,
+      }));
+      setCode(currentCode);
+      setLastSavedContent(currentCode);
       setIsDirty(false);
     } catch (err) {
       if (err instanceof APIError && err.statusCode === 401) {
@@ -115,7 +137,7 @@ export default function EditorPage() {
     } finally {
       setSaving(false);
     }
-  }, [session, saving, sessionId, logout, navigate, code]);
+  }, [sessionId, session, saving, code, logout, navigate, normalizeSessionResponse]);
 
   useEffect(() => {
     function handleKeyDown(event) {
@@ -155,6 +177,78 @@ export default function EditorPage() {
     navigate('/settings');
   }, [navigate]);
 
+  const handleNameChange = useCallback((event) => {
+    setSessionName(event.target.value);
+    setNameDirty(true);
+    setError('');
+  }, []);
+
+  const handleNameCommit = useCallback(async () => {
+    if (!sessionId || !session) {
+      return;
+    }
+
+    const trimmed = sessionName.trim();
+    const currentFilename = session.filename || '';
+
+    if (!trimmed) {
+      setSessionName(currentFilename || '');
+      setNameDirty(false);
+      setError('Session name cannot be empty.');
+      return;
+    }
+
+    if (trimmed === currentFilename) {
+      setSessionName(currentFilename);
+      setNameDirty(false);
+      return;
+    }
+
+    try {
+      setNameSaving(true);
+      const response = await api.updateSessionMetadata(sessionId, {
+        filename: trimmed,
+      });
+      const updatedMetadata = normalizeSessionResponse(response);
+
+      setSession((prev) => ({
+        ...(prev || {}),
+        ...(updatedMetadata || {}),
+        filename: trimmed,
+      }));
+      setSessionName(trimmed);
+    } catch (err) {
+      const message =
+        err instanceof APIError
+          ? err.message || 'Failed to rename session.'
+          : 'Failed to rename session. Please try again.';
+      setError(message);
+      setSessionName(currentFilename);
+    } finally {
+      setNameSaving(false);
+      setNameDirty(false);
+    }
+  }, [sessionId, session, sessionName, normalizeSessionResponse]);
+
+  const handleNameBlur = useCallback(() => {
+    void handleNameCommit();
+  }, [handleNameCommit]);
+
+  const handleNameKeyDown = useCallback(
+    (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        event.currentTarget.blur();
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setSessionName(session?.filename || '');
+        setNameDirty(false);
+      }
+    },
+    [session],
+  );
+
   if (loading) {
     return (
       <div className="loading-page">
@@ -193,8 +287,17 @@ export default function EditorPage() {
             className="editor-logo"
           />
           <div className="editor-filename">
-            <span className="filename-text">{session.filename || 'Untitled'}</span>
-            {isDirty ? (
+            <input
+              className="editor-filename-input"
+              value={sessionName}
+              placeholder="Untitled"
+              onChange={handleNameChange}
+              onBlur={handleNameBlur}
+              onKeyDown={handleNameKeyDown}
+              disabled={nameSaving}
+              aria-label="Session name"
+            />
+            {isDirty || nameDirty ? (
               <span className="unsaved-indicator" title="Unsaved changes">
                 &#x25cf;
               </span>

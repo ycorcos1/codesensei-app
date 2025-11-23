@@ -783,10 +783,28 @@ a:hover {
   gap: 8px;
 }
 
-.filename-text {
+.editor-filename-input {
+  background: transparent;
+  border: none;
+  color: var(--light-gray);
   font-size: 16px;
   font-weight: 600;
-  color: var(--light-gray);
+  outline: none;
+  padding: 0;
+  width: 320px;
+}
+
+.editor-filename-input::placeholder {
+  color: var(--dim-gray);
+}
+
+.editor-filename-input:disabled {
+  color: var(--dim-gray);
+  cursor: not-allowed;
+}
+
+.editor-filename-input:focus {
+  border-bottom: 1px solid var(--blood-orange);
 }
 
 .unsaved-indicator {
@@ -872,8 +890,9 @@ a:hover {
     height: 36px;
   }
 
-  .filename-text {
+  .editor-filename-input {
     font-size: 14px;
+    width: 240px;
   }
 
   .editor-nav-right {
