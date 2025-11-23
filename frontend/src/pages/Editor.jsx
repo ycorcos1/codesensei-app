@@ -527,6 +527,11 @@ export default function EditorPage() {
             <label htmlFor="editor-language-select" className="sr-only">
               Select programming language
             </label>
+            {languageSaving ? (
+              <span className="language-saving-indicator" aria-live="polite">
+                Saving...
+              </span>
+            ) : null}
             <select
               id="editor-language-select"
               className="language-dropdown"
@@ -541,11 +546,6 @@ export default function EditorPage() {
                 </option>
               ))}
             </select>
-            {languageSaving ? (
-              <span className="language-saving-indicator" aria-live="polite">
-                Saving...
-              </span>
-            ) : null}
           </div>
           <button
             type="button"
