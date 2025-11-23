@@ -6,10 +6,12 @@
  */
 
 exports.handler = async (event) => {
+  const httpMethod = event.requestContext?.httpMethod || event.httpMethod;
+  
   console.log('Health check invoked', {
     timestamp: new Date().toISOString(),
     requestId: event.requestContext?.requestId,
-    method: event.httpMethod,
+    method: httpMethod,
   });
 
   const corsOrigin = process.env.CORS_ALLOWED_ORIGIN || 'http://localhost:5173';
@@ -21,7 +23,7 @@ exports.handler = async (event) => {
   };
 
   // Handle OPTIONS preflight requests
-  if (event.httpMethod === 'OPTIONS') {
+  if (httpMethod === 'OPTIONS') {
     return {
       statusCode: 204,
       headers: corsHeaders,

@@ -76,6 +76,12 @@ Resources:
             RestApiId: !Ref CodeSenseiApi
             Path: /health
             Method: GET
+        HealthCheckOptionsApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CodeSenseiApi
+            Path: /health
+            Method: OPTIONS
 
   AuthFunction:
     Type: AWS::Serverless::Function
