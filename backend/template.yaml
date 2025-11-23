@@ -4,13 +4,26 @@ Description: CodeSensei Backend - Health Check Skeleton
 
 Globals:
   Function:
-    Runtime: nodejs18.x
+    Runtime: nodejs22.x
     Timeout: 30
     MemorySize: 128
     Environment:
       Variables:
         NODE_ENV: !Ref Environment
         REGION: !Ref AWS::Region
+        USERS_TABLE: !Ref UsersTable
+        SESSIONS_TABLE: !Ref SessionsTable
+        THREADS_TABLE: !Ref ThreadsTable
+        MESSAGES_TABLE: !Ref MessagesTable
+        RATE_LIMITS_TABLE: !Ref RateLimitsTable
+        AUTH_RATE_LIMIT_PER_MINUTE: '5'
+        CORS_ALLOWED_ORIGIN: !Ref CorsAllowedOrigin
+        JWT_ACCESS_EXPIRY: '15m'
+        JWT_REFRESH_EXPIRY: '7d'
+        JWT_ISSUER: CodeSensei
+        ACCESS_COOKIE_NAME: accessToken
+        REFRESH_COOKIE_NAME: refreshToken
+        JWT_SECRET: !Sub '{{resolve:secretsmanager:CodeSensei-JWT-Secret-${Environment}:SecretString:secret}}'
 
 Parameters:
   Environment:
@@ -21,6 +34,10 @@ Parameters:
       - staging
       - prod
     Description: Environment name
+  CorsAllowedOrigin:
+    Type: String
+    Default: http://localhost:5173
+    Description: Allowed CORS origin for API Gateway responses
 
 Resources:
   CodeSenseiApi:
@@ -30,9 +47,9 @@ Resources:
       StageName: !Ref Environment
       Cors:
         AllowMethods: "'GET,POST,PUT,PATCH,DELETE,OPTIONS'"
-        AllowHeaders: "'Content-Type,Authorization,X-Requested-With'"
-        AllowOrigin: "'*'"
-        AllowCredentials: false
+        AllowHeaders: "'Content-Type,Authorization,X-Requested-With,Cookie'"
+        AllowOrigin: !Sub "'${CorsAllowedOrigin}'"
+        AllowCredentials: true
       Auth:
         DefaultAuthorizer: NONE
 
@@ -43,6 +60,15 @@ Resources:
       CodeUri: src/health/
       Handler: index.handler
       Description: Health check endpoint for CodeSensei
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UsersTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SessionsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ThreadsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MessagesTable
       Events:
         HealthCheckApi:
           Type: Api
@@ -50,6 +76,169 @@ Resources:
             RestApiId: !Ref CodeSenseiApi
             Path: /health
             Method: GET
+
+  AuthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'CodeSensei-Auth-${Environment}'
+      CodeUri: src/auth/
+      Handler: index.handler
+      Description: Authentication endpoints for CodeSensei
+      MemorySize: 256
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UsersTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RateLimitsTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+                - secretsmanager:DescribeSecret
+              Resource: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:CodeSensei-JWT-Secret-${Environment}-*'
+      Events:
+        Signup:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CodeSenseiApi
+            Path: /auth/signup
+            Method: POST
+        Login:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CodeSenseiApi
+            Path: /auth/login
+            Method: POST
+        Logout:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CodeSenseiApi
+            Path: /auth/logout
+            Method: POST
+        Refresh:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CodeSenseiApi
+            Path: /auth/refresh
+            Method: POST
+
+  UsersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'CodeSensei-Users-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: user_id
+          AttributeType: S
+        - AttributeName: email
+          AttributeType: S
+        - AttributeName: username
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: EmailIndex
+          KeySchema:
+            - AttributeName: email
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: UsernameIndex
+          KeySchema:
+            - AttributeName: username
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+  SessionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'CodeSensei-Sessions-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: session_id
+          AttributeType: S
+        - AttributeName: user_id
+          AttributeType: S
+        - AttributeName: created_at
+          AttributeType: S
+      KeySchema:
+        - AttributeName: session_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: UserIdIndex
+          KeySchema:
+            - AttributeName: user_id
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  ThreadsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'CodeSensei-Threads-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: thread_id
+          AttributeType: S
+        - AttributeName: session_id
+          AttributeType: S
+        - AttributeName: created_at
+          AttributeType: S
+      KeySchema:
+        - AttributeName: thread_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: SessionIdIndex
+          KeySchema:
+            - AttributeName: session_id
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  MessagesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'CodeSensei-Messages-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: thread_id
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+      KeySchema:
+        - AttributeName: thread_id
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+
+  RateLimitsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'CodeSensei-RateLimits-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      AttributeDefinitions:
+        - AttributeName: rate_key
+          AttributeType: S
+      KeySchema:
+        - AttributeName: rate_key
+          KeyType: HASH
 
 Outputs:
   ApiUrl:
@@ -67,4 +256,38 @@ Outputs:
     Value: !GetAtt HealthCheckFunction.Arn
     Export:
       Name: !Sub 'CodeSensei-HealthCheckFunction-${Environment}'
+
+  AuthFunctionArn:
+    Description: Auth Lambda function ARN
+    Value: !GetAtt AuthFunction.Arn
+    Export:
+      Name: !Sub 'CodeSensei-AuthFunction-${Environment}'
+
+  UsersTableName:
+    Description: Users DynamoDB table name
+    Value: !Ref UsersTable
+    Export:
+      Name: !Sub 'CodeSensei-UsersTable-${Environment}'
+
+  SessionsTableName:
+    Description: Sessions DynamoDB table name
+    Value: !Ref SessionsTable
+    Export:
+      Name: !Sub 'CodeSensei-SessionsTable-${Environment}'
+
+  ThreadsTableName:
+    Description: Threads DynamoDB table name
+    Value: !Ref ThreadsTable
+    Export:
+      Name: !Sub 'CodeSensei-ThreadsTable-${Environment}'
+
+  MessagesTableName:
+    Description: Messages DynamoDB table name
+    Value: !Ref MessagesTable
+    Export:
+      Name: !Sub 'CodeSensei-MessagesTable-${Environment}'
+
+  RateLimitsTableName:
+    Description: Rate limits DynamoDB table name
+    Value: !Ref RateLimitsTable
 
