@@ -41,11 +41,13 @@ logs/
 # Testing
 coverage/
 .nyc_output/
+tests/
 
 # Misc
 .cache/
 temp/
 tmp/
+docs/
 
 # OS files
 Thumbs.db

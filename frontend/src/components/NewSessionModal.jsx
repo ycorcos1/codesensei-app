@@ -131,6 +131,10 @@ function NewSessionModal({ onClose, onSessionCreated }) {
     try {
       const content = await readFileContent(file);
       const inferredLanguage = detectLanguage(file.name);
+      const normalizedLanguage =
+        inferredLanguage && LANGUAGE_OPTIONS.includes(inferredLanguage)
+          ? inferredLanguage
+          : '';
 
       setSelectedFile({
         name: file.name,
@@ -138,9 +142,13 @@ function NewSessionModal({ onClose, onSessionCreated }) {
         content,
         language: inferredLanguage,
       });
+      setNameInput(file.name);
+      setLanguageInput(normalizedLanguage);
       setFileError('');
     } catch (err) {
       setSelectedFile(null);
+      setNameInput('');
+      setLanguageInput('');
       setFileError(err?.message || 'Failed to read file. Please try again.');
     }
   }, []);
@@ -236,6 +244,8 @@ function NewSessionModal({ onClose, onSessionCreated }) {
 
   const clearFileSelection = useCallback(() => {
     setSelectedFile(null);
+    setNameInput('');
+    setLanguageInput('');
     setFileError('');
   }, []);
 
