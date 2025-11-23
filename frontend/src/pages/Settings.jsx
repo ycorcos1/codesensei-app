@@ -28,7 +28,7 @@ export default function Settings() {
             onClick={() => {}}
             disabled
           >
-            New Session
+            Settings
           </button>
           <button type="button" className="btn btn-secondary btn-small" onClick={handleLogout}>
             Logout

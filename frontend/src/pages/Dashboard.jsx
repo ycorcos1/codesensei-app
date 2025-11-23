@@ -182,7 +182,7 @@ export default function Dashboard() {
             className="btn btn-primary btn-small"
             onClick={() => navigate('/settings')}
           >
-            New Session
+            Settings
           </button>
           <button type="button" className="btn btn-secondary btn-small" onClick={handleLogout}>
             Logout
