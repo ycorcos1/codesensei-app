@@ -122,6 +122,43 @@ Resources:
             Path: /auth/refresh
             Method: POST
 
+  UsersFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'CodeSensei-Users-${Environment}'
+      CodeUri: src/users/
+      Handler: index.handler
+      Description: User profile management endpoints for CodeSensei
+      MemorySize: 256
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UsersTable
+      Events:
+        GetProfile:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CodeSenseiApi
+            Path: /users/me
+            Method: GET
+        UpdateProfile:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CodeSenseiApi
+            Path: /users/me
+            Method: PUT
+        ChangePassword:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CodeSenseiApi
+            Path: /users/me/password
+            Method: PUT
+        DeleteAccount:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CodeSenseiApi
+            Path: /users/me
+            Method: DELETE
+
   UsersTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -262,6 +299,12 @@ Outputs:
     Value: !GetAtt AuthFunction.Arn
     Export:
       Name: !Sub 'CodeSensei-AuthFunction-${Environment}'
+
+  UsersFunctionArn:
+    Description: Users Lambda function ARN
+    Value: !GetAtt UsersFunction.Arn
+    Export:
+      Name: !Sub 'CodeSensei-UsersFunction-${Environment}'
 
   UsersTableName:
     Description: Users DynamoDB table name
