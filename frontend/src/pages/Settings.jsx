@@ -19,7 +19,6 @@ export default function Settings() {
             alt="CodeSensei" 
             className="dashboard-logo"
           />
-          <span className="dashboard-subtitle">Inline AI code review sessions</span>
         </div>
         <div className="dashboard-nav-actions">
           <button
