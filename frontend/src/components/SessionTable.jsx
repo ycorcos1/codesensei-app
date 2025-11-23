@@ -96,7 +96,7 @@ function SessionTable({
   hasMore,
   onLoadMore,
   onOpenSession,
-  onDeleteSession,
+  onRequestDelete,
   onCreateSession,
 }) {
   const content = useMemo(() => {
@@ -131,13 +131,7 @@ function SessionTable({
           };
 
           const handleDelete = () => {
-            const confirmation = window.confirm(
-              `Delete session "${filename}"?\n\nThis will remove the session and all associated threads. This action cannot be undone.`,
-            );
-
-            if (confirmation) {
-              onDeleteSession?.(session);
-            }
+            onRequestDelete?.(session);
           };
 
           return (
@@ -171,7 +165,7 @@ function SessionTable({
         })}
       </tbody>
     );
-  }, [loading, sessions, onDeleteSession, onOpenSession]);
+  }, [loading, sessions, onRequestDelete, onOpenSession]);
 
   if (!loading && sessions.length === 0) {
     return <EmptyState onCreate={onCreateSession} />;

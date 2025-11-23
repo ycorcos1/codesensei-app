@@ -51,6 +51,9 @@ export default function Dashboard() {
   const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState("");
   const [showModal, setShowModal] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState(null);
+  const [deleteError, setDeleteError] = useState("");
+  const [deleting, setDeleting] = useState(false);
 
   const fetchSessions = useCallback(
     async ({ cursor: cursorOverride = null, append = false } = {}) => {
@@ -142,26 +145,46 @@ export default function Dashboard() {
     [navigate]
   );
 
-  const handleDeleteSession = useCallback(async (session) => {
-    const sessionIdentifier = getSessionId(session);
+  const handleRequestDelete = useCallback((session) => {
+    setPendingDelete(session);
+    setDeleteError("");
+  }, []);
+
+  const handleCancelDelete = useCallback(() => {
+    setPendingDelete(null);
+    setDeleteError("");
+  }, []);
+
+  const handleConfirmDelete = useCallback(async () => {
+    if (!pendingDelete) {
+      return;
+    }
+
+    const sessionIdentifier = getSessionId(pendingDelete);
 
     if (!sessionIdentifier) {
+      setDeleteError("Unable to determine session identifier.");
       return;
     }
 
     try {
+      setDeleting(true);
+      setDeleteError("");
       await api.deleteSession(sessionIdentifier);
       setSessions((prev) =>
         prev.filter((item) => getSessionId(item) !== sessionIdentifier)
       );
+      setPendingDelete(null);
     } catch (err) {
       const message =
         err instanceof APIError
           ? err.message || "Failed to delete session."
           : "Failed to delete session. Please try again.";
-      setError(message);
+      setDeleteError(message);
+    } finally {
+      setDeleting(false);
     }
-  }, []);
+  }, [pendingDelete]);
 
   const handleLoadMore = useCallback(() => {
     if (!cursor || loadingMore) {
@@ -234,7 +257,7 @@ export default function Dashboard() {
           hasMore={hasMore}
           onLoadMore={handleLoadMore}
           onOpenSession={handleOpenSession}
-          onDeleteSession={handleDeleteSession}
+          onRequestDelete={handleRequestDelete}
           onCreateSession={() => setShowModal(true)}
         />
       </main>
@@ -244,6 +267,60 @@ export default function Dashboard() {
           onClose={() => setShowModal(false)}
           onSessionCreated={handleSessionCreated}
         />
+      ) : null}
+
+      {pendingDelete ? (
+        <div className="modal-overlay" role="dialog" aria-modal="true">
+          <div className="modal-card">
+            <button
+              type="button"
+              className="modal-close"
+              onClick={handleCancelDelete}
+              aria-label="Close modal"
+              disabled={deleting}
+            >
+              ×
+            </button>
+
+            <h2 className="modal-title">Delete session</h2>
+            <p>
+              Delete session{" "}
+              <strong>
+                {pendingDelete?.filename ||
+                  pendingDelete?.name ||
+                  "this session"}
+              </strong>
+              ?<br />
+              This will remove the session and all associated threads. This
+              action cannot be undone.
+            </p>
+
+            {deleteError ? (
+              <div className="form-error" role="alert">
+                {deleteError}
+              </div>
+            ) : null}
+
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={handleCancelDelete}
+                disabled={deleting}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleConfirmDelete}
+                disabled={deleting}
+              >
+                {deleting ? "Deleting..." : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </div>
   );
