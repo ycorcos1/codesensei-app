@@ -20,12 +20,16 @@ exports.handler = async (event) => {
     region: process.env.REGION || process.env.AWS_REGION,
   };
 
+  const corsOrigin = process.env.CORS_ALLOWED_ORIGIN || 'http://localhost:5173';
+  
   return {
     statusCode: 200,
     headers: {
       'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Credentials': false,
+      'Access-Control-Allow-Origin': corsOrigin,
+      'Access-Control-Allow-Credentials': 'true',
+      'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type,Authorization,X-Requested-With,Cookie',
     },
     body: JSON.stringify(response),
   };

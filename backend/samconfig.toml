@@ -13,7 +13,7 @@ capabilities = "CAPABILITY_IAM"
 confirm_changeset = true
 resolve_s3 = true
 region = "us-east-1"
-parameter_overrides = "Environment=dev"
+parameter_overrides = "Environment=dev CorsAllowedOrigin=https://main.dnq80x6al42k7.amplifyapp.com"
 
 [default.validate.parameters]
 lint = true
