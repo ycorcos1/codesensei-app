@@ -271,6 +271,36 @@ Resources:
             RestApiId: !Ref CodeSenseiApi
             Path: /threads/{thread_id}
             Method: DELETE
+  MessagesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'CodeSensei-Messages-${Environment}'
+      CodeUri: src/messages/
+      Handler: index.handler
+      Description: Message management endpoints for CodeSensei
+      MemorySize: 256
+      Timeout: 20
+      Environment:
+        Variables:
+          MAX_MESSAGES_PER_THREAD: '500'
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MessagesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ThreadsTable
+      Events:
+        CreateMessage:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CodeSenseiApi
+            Path: /threads/{thread_id}/messages
+            Method: POST
+        ListMessages:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CodeSenseiApi
+            Path: /threads/{thread_id}/messages
+            Method: GET
   UsersTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -453,6 +483,12 @@ Outputs:
     Value: !GetAtt ThreadsFunction.Arn
     Export:
       Name: !Sub 'CodeSensei-ThreadsFunction-${Environment}'
+
+  MessagesFunctionArn:
+    Description: Messages Lambda function ARN
+    Value: !GetAtt MessagesFunction.Arn
+    Export:
+      Name: !Sub 'CodeSensei-MessagesFunction-${Environment}'
 
   RateLimitsTableName:
     Description: Rate limits DynamoDB table name
