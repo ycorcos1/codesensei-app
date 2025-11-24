@@ -223,6 +223,54 @@ Resources:
             Path: /sessions/{id}
             Method: DELETE
 
+  ThreadsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'CodeSensei-Threads-${Environment}'
+      CodeUri: src/threads/
+      Handler: index.handler
+      Description: Thread management endpoints for CodeSensei
+      MemorySize: 256
+      Timeout: 20
+      Environment:
+        Variables:
+          MAX_THREADS_PER_SESSION: '50'
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ThreadsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref SessionsTable
+      Events:
+        CreateThread:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CodeSenseiApi
+            Path: /sessions/{id}/threads
+            Method: POST
+        ListThreads:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CodeSenseiApi
+            Path: /sessions/{id}/threads
+            Method: GET
+        GetThread:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CodeSenseiApi
+            Path: /threads/{thread_id}
+            Method: GET
+        UpdateThread:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CodeSenseiApi
+            Path: /threads/{thread_id}
+            Method: PUT
+        DeleteThread:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CodeSenseiApi
+            Path: /threads/{thread_id}
+            Method: DELETE
   UsersTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -399,6 +447,12 @@ Outputs:
     Value: !Ref MessagesTable
     Export:
       Name: !Sub 'CodeSensei-MessagesTable-${Environment}'
+
+  ThreadsFunctionArn:
+    Description: Threads Lambda function ARN
+    Value: !GetAtt ThreadsFunction.Arn
+    Export:
+      Name: !Sub 'CodeSensei-ThreadsFunction-${Environment}'
 
   RateLimitsTableName:
     Description: Rate limits DynamoDB table name
