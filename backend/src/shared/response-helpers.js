@@ -1,5 +1,6 @@
 const RAW_ALLOWED_ORIGINS =
-  process.env.CORS_ALLOWED_ORIGIN || 'http://localhost:5173';
+  process.env.CORS_ALLOWED_ORIGIN ||
+  'http://localhost:5173,https://main.dnq80x6al42k7.amplifyapp.com';
 const ALLOWED_ORIGINS = RAW_ALLOWED_ORIGINS.split(',')
   .map((origin) => origin.trim())
   .filter(Boolean);

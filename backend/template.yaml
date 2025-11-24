@@ -36,7 +36,7 @@ Parameters:
     Description: Environment name
   CorsAllowedOrigin:
     Type: String
-    Default: http://localhost:5173
+    Default: https://main.dnq80x6al42k7.amplifyapp.com
     Description: Allowed CORS origin for API Gateway responses
 
 Resources:
