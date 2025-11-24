@@ -14,12 +14,35 @@ exports.handler = async (event) => {
     method: httpMethod,
   });
 
-  const corsOrigin = process.env.CORS_ALLOWED_ORIGIN || 'http://localhost:5173';
+  const rawAllowedOrigins =
+    process.env.CORS_ALLOWED_ORIGIN || 'http://localhost:5173';
+  const allowedOrigins = rawAllowedOrigins
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  const requestOrigin =
+    event.headers?.origin || event.headers?.Origin || undefined;
+
+  const corsOrigin = (() => {
+    if (!allowedOrigins.length) {
+      return requestOrigin || 'http://localhost:5173';
+    }
+    if (allowedOrigins.includes('*')) {
+      return requestOrigin || allowedOrigins[0] || '*';
+    }
+    if (requestOrigin && allowedOrigins.includes(requestOrigin)) {
+      return requestOrigin;
+    }
+    return allowedOrigins[0];
+  })();
+
   const corsHeaders = {
     'Access-Control-Allow-Origin': corsOrigin,
     'Access-Control-Allow-Credentials': 'true',
     'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type,Authorization,X-Requested-With,Cookie',
+    Vary: 'Origin',
   };
 
   // Handle OPTIONS preflight requests

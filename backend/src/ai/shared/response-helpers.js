@@ -1,13 +1,37 @@
-const DEFAULT_ORIGIN =
+const RAW_ALLOWED_ORIGINS =
   process.env.CORS_ALLOWED_ORIGIN || 'http://localhost:5173';
+const ALLOWED_ORIGINS = RAW_ALLOWED_ORIGINS.split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 
-function baseHeaders(extra = {}) {
+function resolveAllowedOrigin(requestOrigin) {
+  if (!ALLOWED_ORIGINS.length) {
+    return requestOrigin || 'http://localhost:5173';
+  }
+
+  if (ALLOWED_ORIGINS.includes('*')) {
+    return requestOrigin || ALLOWED_ORIGINS[0] || '*';
+  }
+
+  if (requestOrigin && ALLOWED_ORIGINS.includes(requestOrigin)) {
+    return requestOrigin;
+  }
+
+  return ALLOWED_ORIGINS[0];
+}
+
+function buildCorsHeaders(requestOrigin, extra = {}) {
   return {
     'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': DEFAULT_ORIGIN,
+    'Access-Control-Allow-Origin': resolveAllowedOrigin(requestOrigin),
     'Access-Control-Allow-Credentials': 'true',
+    Vary: 'Origin',
     ...extra,
   };
+}
+
+function baseHeaders(extra = {}) {
+  return buildCorsHeaders(undefined, extra);
 }
 
 function applyCookies(response, cookies) {
@@ -57,8 +81,20 @@ function error(statusCode, code, message, field, details) {
   };
 }
 
+function applyCors(response, requestOrigin) {
+  if (!response || typeof response !== 'object') {
+    return response;
+  }
+
+  return {
+    ...response,
+    headers: buildCorsHeaders(requestOrigin, response.headers || {}),
+  };
+}
+
 module.exports = {
   success,
   error,
+  applyCors,
 };
 

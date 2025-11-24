@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const { error } = require('./response-helpers');
+const { error, applyCors } = require('./response-helpers');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_ISSUER = process.env.JWT_ISSUER || 'codesensei';
@@ -55,13 +55,24 @@ function verifyAccessToken(token) {
 
 function authRequired(handler) {
   return async (event, context) => {
+    const origin = event.headers?.origin || event.headers?.Origin;
+    const method =
+      (event.httpMethod || event.requestContext?.http?.method || '').toUpperCase();
+
+    const respond = (response) => applyCors(response, origin);
+
+    if (method === 'OPTIONS') {
+      const response = await handler(event, context);
+      return respond(response);
+    }
+
     const cookies = parseCookies(event.headers);
     const tokenFromCookie = cookies.accessToken;
     const tokenFromHeader = getTokenFromAuthorization(event.headers);
     const token = tokenFromCookie || tokenFromHeader;
 
     if (!token) {
-      return error(401, 'UNAUTHORIZED', 'Authentication required');
+      return respond(error(401, 'UNAUTHORIZED', 'Authentication required'));
     }
 
     try {
@@ -73,9 +84,10 @@ function authRequired(handler) {
           user_id: payload.sub,
         },
       };
-      return handler(event, context, payload);
+      const response = await handler(event, context, payload);
+      return respond(response);
     } catch (err) {
-      return error(401, 'UNAUTHORIZED', 'Invalid or expired token');
+      return respond(error(401, 'UNAUTHORIZED', 'Invalid or expired token'));
     }
   };
 }
