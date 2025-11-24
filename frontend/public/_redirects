@@ -1,3 +1,6 @@
+/assets/*    /assets/:splat   200
+/favicon.png    /favicon.png   200
+/manifest.json    /manifest.json   200
 /*    /index.html   200
 /login/    /login   301
 /signup/    /signup   301
