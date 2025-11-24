@@ -126,5 +126,18 @@ export const api = {
     request(`/threads/${threadId}`, {
       method: 'DELETE',
     }),
+
+  getMessages: (threadId, cursor) => {
+    const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
+    return request(`/threads/${threadId}/messages${query}`, {
+      method: 'GET',
+    });
+  },
+
+  createMessage: (threadId, payload) =>
+    request(`/threads/${threadId}/messages`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
 };
 

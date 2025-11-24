@@ -5,6 +5,7 @@ import Editor from "@monaco-editor/react";
 import { api, APIError } from "../utils/api";
 import { useAuth } from "../context/AuthContext";
 import ThreadSidebar from "../components/ThreadSidebar";
+import ThreadPanel from "../components/ThreadPanel";
 
 const LANGUAGE_OPTIONS = [
   "JavaScript",
@@ -277,6 +278,15 @@ export default function EditorPage() {
   const derivedLanguage = useMemo(() => {
     return getMonacoLanguage(selectedLanguage);
   }, [selectedLanguage]);
+
+  const selectedThread = useMemo(() => {
+    if (!selectedThreadId) {
+      return null;
+    }
+    return (
+      threads.find((thread) => thread.thread_id === selectedThreadId) || null
+    );
+  }, [threads, selectedThreadId]);
 
   const hasPendingChanges = useMemo(
     () => Boolean(isDirty || nameDirty),
@@ -820,9 +830,27 @@ export default function EditorPage() {
     [threads]
   );
 
+  const handleCloseThreadPanel = useCallback(() => {
+    setSelectedThreadId(null);
+  }, []);
+
   useEffect(() => {
     threadsRef.current = threads;
   }, [threads]);
+
+  useEffect(() => {
+    if (!selectedThreadId) {
+      return;
+    }
+
+    const stillExists = threads.some(
+      (thread) => thread.thread_id === selectedThreadId
+    );
+
+    if (!stillExists) {
+      setSelectedThreadId(null);
+    }
+  }, [threads, selectedThreadId]);
 
   useEffect(() => {
     selectedThreadIdRef.current = selectedThreadId;
@@ -995,6 +1023,12 @@ export default function EditorPage() {
           hasSelection={hasSelection}
           creatingThread={creatingThread}
         />
+        {selectedThread ? (
+          <ThreadPanel
+            thread={selectedThread}
+            onClose={handleCloseThreadPanel}
+          />
+        ) : null}
       </div>
 
       {showLeaveModal ? (
