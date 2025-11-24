@@ -29,6 +29,11 @@ app.get("/manifest.json", (req, res, next) => {
   next();
 });
 
+app.get("/codesensei_logo.png", (req, res, next) => {
+  // Let static middleware handle logo
+  next();
+});
+
 // SPA fallback: all other routes serve index.html
 app.get("*", (req, res) => {
   const indexPath = join(DIST_DIR, "index.html");
