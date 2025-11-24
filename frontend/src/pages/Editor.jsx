@@ -1,58 +1,59 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import Editor from '@monaco-editor/react';
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import Editor from "@monaco-editor/react";
 
-import { api, APIError } from '../utils/api';
-import { useAuth } from '../context/AuthContext';
+import { api, APIError } from "../utils/api";
+import { useAuth } from "../context/AuthContext";
+import ThreadSidebar from "../components/ThreadSidebar";
 
 const LANGUAGE_OPTIONS = [
-  'JavaScript',
-  'TypeScript',
-  'Python',
-  'Java',
-  'Go',
-  'Rust',
-  'C++',
-  'C',
-  'C#',
-  'PHP',
-  'Ruby',
-  'HTML',
-  'CSS',
-  'SQL',
-  'JSON',
-  'YAML',
-  'Markdown',
-  'Shell',
-  'Plain Text',
+  "JavaScript",
+  "TypeScript",
+  "Python",
+  "Java",
+  "Go",
+  "Rust",
+  "C++",
+  "C",
+  "C#",
+  "PHP",
+  "Ruby",
+  "HTML",
+  "CSS",
+  "SQL",
+  "JSON",
+  "YAML",
+  "Markdown",
+  "Shell",
+  "Plain Text",
 ];
 
-const DEFAULT_LANGUAGE = 'Plain Text';
+const DEFAULT_LANGUAGE = "Plain Text";
 
 const LANGUAGE_TO_MONACO = {
-  JavaScript: 'javascript',
-  TypeScript: 'typescript',
-  Python: 'python',
-  Java: 'java',
-  Go: 'go',
-  Rust: 'rust',
-  'C++': 'cpp',
-  C: 'c',
-  'C#': 'csharp',
-  PHP: 'php',
-  Ruby: 'ruby',
-  HTML: 'html',
-  CSS: 'css',
-  SQL: 'sql',
-  JSON: 'json',
-  YAML: 'yaml',
-  Markdown: 'markdown',
-  Shell: 'shell',
-  'Plain Text': 'plaintext',
+  JavaScript: "javascript",
+  TypeScript: "typescript",
+  Python: "python",
+  Java: "java",
+  Go: "go",
+  Rust: "rust",
+  "C++": "cpp",
+  C: "c",
+  "C#": "csharp",
+  PHP: "php",
+  Ruby: "ruby",
+  HTML: "html",
+  CSS: "css",
+  SQL: "sql",
+  JSON: "json",
+  YAML: "yaml",
+  Markdown: "markdown",
+  Shell: "shell",
+  "Plain Text": "plaintext",
 };
 
 function normalizeLanguageName(rawValue) {
-  if (!rawValue || typeof rawValue !== 'string') {
+  if (!rawValue || typeof rawValue !== "string") {
     return DEFAULT_LANGUAGE;
   }
 
@@ -62,7 +63,7 @@ function normalizeLanguageName(rawValue) {
   }
 
   const matchedOption = LANGUAGE_OPTIONS.find(
-    (option) => option.toLowerCase() === trimmed.toLowerCase(),
+    (option) => option.toLowerCase() === trimmed.toLowerCase()
   );
 
   return matchedOption || DEFAULT_LANGUAGE;
@@ -70,7 +71,7 @@ function normalizeLanguageName(rawValue) {
 
 function getMonacoLanguage(languageName) {
   const normalized = normalizeLanguageName(languageName);
-  return LANGUAGE_TO_MONACO[normalized] || 'plaintext';
+  return LANGUAGE_TO_MONACO[normalized] || "plaintext";
 }
 
 export default function EditorPage() {
@@ -80,27 +81,198 @@ export default function EditorPage() {
 
   const editorRef = useRef(null);
   const monacoRef = useRef(null);
+  const editorDisposablesRef = useRef([]);
+  const gutterDecorationsRef = useRef([]);
+  const selectedThreadDecorationRef = useRef([]);
+  const threadsRef = useRef([]);
+  const selectedThreadIdRef = useRef(null);
   const leaveActionRef = useRef(null);
   const editorUrlRef = useRef(window.location.href);
 
   const [session, setSession] = useState(null);
-  const [code, setCode] = useState('');
-  const [sessionName, setSessionName] = useState('');
+  const [code, setCode] = useState("");
+  const [sessionName, setSessionName] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
   const [isDirty, setIsDirty] = useState(false);
-  const [lastSavedContent, setLastSavedContent] = useState('');
+  const [lastSavedContent, setLastSavedContent] = useState("");
   const [nameDirty, setNameDirty] = useState(false);
   const [nameSaving, setNameSaving] = useState(false);
   const [showLeaveModal, setShowLeaveModal] = useState(false);
   const [selectedLanguage, setSelectedLanguage] = useState(DEFAULT_LANGUAGE);
   const [languageSaving, setLanguageSaving] = useState(false);
+  const [threads, setThreads] = useState([]);
+  const [threadsLoading, setThreadsLoading] = useState(false);
+  const [creatingThread, setCreatingThread] = useState(false);
+  const [selectedThreadId, setSelectedThreadId] = useState(null);
+  const [hasSelection, setHasSelection] = useState(false);
 
   const normalizeSessionResponse = useCallback(
     (payload) => payload?.session ?? payload ?? null,
-    [],
+    []
   );
+
+  const normalizeThreadsResponse = useCallback((payload) => {
+    if (!payload) {
+      return [];
+    }
+    if (Array.isArray(payload)) {
+      return payload;
+    }
+    if (Array.isArray(payload.threads)) {
+      return payload.threads;
+    }
+    return [];
+  }, []);
+
+  const normalizeThreadEntity = useCallback((payload) => {
+    if (!payload) {
+      return null;
+    }
+    return payload.thread ?? payload;
+  }, []);
+
+  const fetchThreads = useCallback(async () => {
+    if (!sessionId) {
+      return;
+    }
+
+    try {
+      setThreadsLoading(true);
+      const response = await api.getThreads(sessionId);
+      const threadList = normalizeThreadsResponse(response);
+      setThreads(threadList);
+    } catch (err) {
+      const message =
+        err instanceof APIError
+          ? err.message || "Failed to load threads."
+          : "Failed to load threads. Please try again.";
+      setError(message);
+    } finally {
+      setThreadsLoading(false);
+    }
+  }, [sessionId, normalizeThreadsResponse]);
+
+  const applyThreadGutterDecorations = useCallback(() => {
+    const editorInstance = editorRef.current;
+    const monaco = monacoRef.current;
+
+    if (!editorInstance || !monaco) {
+      return;
+    }
+
+    if (!threads.length) {
+      if (gutterDecorationsRef.current.length) {
+        gutterDecorationsRef.current = editorInstance.deltaDecorations(
+          gutterDecorationsRef.current,
+          []
+        );
+      }
+      return;
+    }
+
+    const lineGroups = threads.reduce((acc, thread) => {
+      const line = thread.start_line;
+      if (!acc[line]) {
+        acc[line] = [];
+      }
+      acc[line].push(thread);
+      return acc;
+    }, {});
+
+    const Range = monaco.Range;
+    const hoverFromThread = (thread) => {
+      const preview = (thread.selected_text || "").trim();
+      if (!preview) {
+        return "Thread";
+      }
+      const trimmed = preview.split("\n").slice(0, 3).join("\n");
+      return trimmed.length > 160
+        ? `${trimmed.slice(0, 157).trimEnd()}…`
+        : trimmed;
+    };
+
+    const newDecorations = threads.map((thread) => {
+      const lineThreads = lineGroups[thread.start_line] || [];
+      const glyphClassName =
+        lineThreads.length > 1
+          ? "thread-gutter-marker-multiple"
+          : "thread-gutter-marker";
+
+      return {
+        range: new Range(thread.start_line, 1, thread.start_line, 1),
+        options: {
+          isWholeLine: false,
+          glyphMarginClassName: glyphClassName,
+          glyphMarginHoverMessage: [
+            {
+              value: `**Thread**\n\n${hoverFromThread(thread)}`,
+            },
+          ],
+          stickiness:
+            monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+        },
+      };
+    });
+
+    gutterDecorationsRef.current = editorInstance.deltaDecorations(
+      gutterDecorationsRef.current,
+      newDecorations
+    );
+  }, [threads]);
+
+  const applySelectedThreadHighlight = useCallback(() => {
+    const editorInstance = editorRef.current;
+    const monaco = monacoRef.current;
+
+    if (!editorInstance || !monaco) {
+      return;
+    }
+
+    const targetThread = threads.find(
+      (thread) => thread.thread_id === selectedThreadId
+    );
+
+    if (!targetThread) {
+      if (selectedThreadDecorationRef.current.length) {
+        selectedThreadDecorationRef.current = editorInstance.deltaDecorations(
+          selectedThreadDecorationRef.current,
+          []
+        );
+      }
+      return;
+    }
+
+    const model = editorInstance.getModel();
+    if (!model) {
+      return;
+    }
+
+    const maxColumn = model.getLineMaxColumn(targetThread.end_line);
+
+    const highlights = [
+      {
+        range: new monaco.Range(
+          targetThread.start_line,
+          1,
+          targetThread.end_line,
+          maxColumn || 1
+        ),
+        options: {
+          className: "thread-selection-decoration",
+          isWholeLine: true,
+          stickiness:
+            monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+        },
+      },
+    ];
+
+    selectedThreadDecorationRef.current = editorInstance.deltaDecorations(
+      selectedThreadDecorationRef.current,
+      highlights
+    );
+  }, [selectedThreadId, threads]);
 
   const derivedLanguage = useMemo(() => {
     return getMonacoLanguage(selectedLanguage);
@@ -108,43 +280,44 @@ export default function EditorPage() {
 
   const hasPendingChanges = useMemo(
     () => Boolean(isDirty || nameDirty),
-    [isDirty, nameDirty],
+    [isDirty, nameDirty]
   );
 
   useEffect(() => {
     async function fetchSession() {
       if (!sessionId) {
-        setError('Session ID missing.');
+        setError("Session ID missing.");
         setLoading(false);
         return;
       }
 
       try {
         setLoading(true);
-        setError('');
+        setError("");
         const response = await api.getSession(sessionId);
         const fetchedSession = normalizeSessionResponse(response);
-        const initialCode = fetchedSession?.code_content ?? '';
+        const initialCode = fetchedSession?.code_content ?? "";
 
         setSession(fetchedSession);
-        setSessionName(fetchedSession?.filename || '');
+        setSessionName(fetchedSession?.filename || "");
         setCode(initialCode);
         setLastSavedContent(initialCode);
         setIsDirty(false);
         setNameDirty(false);
+        await fetchThreads();
       } catch (err) {
         if (err instanceof APIError && err.statusCode === 401) {
           await logout();
-          navigate('/login', { replace: true });
+          navigate("/login", { replace: true });
           return;
         }
         if (err instanceof APIError && err.statusCode === 404) {
-          setError('Session not found.');
+          setError("Session not found.");
         } else {
           const message =
             err instanceof APIError
-              ? err.message || 'Failed to load session.'
-              : 'Failed to load session. Please try again.';
+              ? err.message || "Failed to load session."
+              : "Failed to load session. Please try again.";
           setError(message);
         }
       } finally {
@@ -153,7 +326,7 @@ export default function EditorPage() {
     }
 
     fetchSession();
-  }, [sessionId, logout, navigate, normalizeSessionResponse]);
+  }, [sessionId, logout, navigate, normalizeSessionResponse, fetchThreads]);
 
   useEffect(() => {
     if (!session) {
@@ -174,7 +347,7 @@ export default function EditorPage() {
 
     if (!session.version_number) {
       setError(
-        'Unable to save changes because the session metadata is out of sync. Please reload the page and try again.',
+        "Unable to save changes because the session metadata is out of sync. Please reload the page and try again."
       );
       return;
     }
@@ -183,7 +356,7 @@ export default function EditorPage() {
 
     try {
       setSaving(true);
-      setError('');
+      setError("");
 
       const payload = {
         code_content: currentCode,
@@ -204,50 +377,192 @@ export default function EditorPage() {
     } catch (err) {
       if (err instanceof APIError && err.statusCode === 401) {
         await logout();
-        navigate('/login', { replace: true });
+        navigate("/login", { replace: true });
         return;
       }
       if (err instanceof APIError && err.statusCode === 409) {
         setError(
-          'Version conflict detected. Reload the session to see the latest changes.',
+          "Version conflict detected. Reload the session to see the latest changes."
         );
       } else {
         const message =
           err instanceof APIError
-            ? err.message || 'Failed to save session.'
-            : 'Failed to save session. Please try again.';
+            ? err.message || "Failed to save session."
+            : "Failed to save session. Please try again.";
         setError(message);
       }
     } finally {
       setSaving(false);
     }
-  }, [sessionId, session, saving, code, logout, navigate, normalizeSessionResponse]);
+  }, [
+    sessionId,
+    session,
+    saving,
+    code,
+    logout,
+    navigate,
+    normalizeSessionResponse,
+  ]);
 
   useEffect(() => {
     function handleKeyDown(event) {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
         event.preventDefault();
         handleSave();
       }
     }
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleSave]);
 
-  const handleEditorDidMount = useCallback((editorInstance, monacoInstance) => {
-    editorRef.current = editorInstance;
-    monacoRef.current = monacoInstance;
-  }, []);
+  const handleEditorDidMount = useCallback(
+    (editorInstance, monacoInstance) => {
+      editorRef.current = editorInstance;
+      monacoRef.current = monacoInstance;
+
+      editorInstance.updateOptions({ glyphMargin: true });
+
+      const currentSelection = editorInstance.getSelection();
+      setHasSelection(Boolean(currentSelection && !currentSelection.isEmpty()));
+
+      applyThreadGutterDecorations();
+      applySelectedThreadHighlight();
+
+      const selectionDisposable = editorInstance.onDidChangeCursorSelection(
+        (event) => {
+          const selection = event.selection;
+          setHasSelection(Boolean(selection && !selection.isEmpty()));
+        }
+      );
+
+      const mouseDownDisposable = editorInstance.onMouseDown((event) => {
+        if (
+          event.target.type ===
+            monacoInstance.editor.MouseTargetType.GUTTER_GLYPH_MARGIN &&
+          event.target.position?.lineNumber
+        ) {
+          const lineNumber = event.target.position.lineNumber;
+          const lineThreads = threadsRef.current.filter(
+            (thread) => thread.start_line === lineNumber
+          );
+          if (!lineThreads.length) {
+            return;
+          }
+          const preferredThread =
+            lineThreads.find(
+              (thread) => thread.thread_id === selectedThreadIdRef.current
+            ) || lineThreads[0];
+          setSelectedThreadId(preferredThread.thread_id);
+          editorInstance.revealLineInCenter(lineNumber);
+        }
+      });
+
+      const actionDisposable = editorInstance.addAction({
+        id: "codesensei.ask-ai",
+        label: "Ask AI about selection",
+        keybindings: [
+          monacoInstance.KeyMod.CtrlCmd | monacoInstance.KeyCode.Enter,
+        ],
+        contextMenuGroupId: "navigation",
+        contextMenuOrder: 1.1,
+        run: async () => {
+          await handleCreateThread();
+        },
+      });
+
+      editorDisposablesRef.current.forEach((disposable) => {
+        if (disposable && typeof disposable.dispose === "function") {
+          disposable.dispose();
+        }
+      });
+
+      editorDisposablesRef.current = [
+        selectionDisposable,
+        mouseDownDisposable,
+        actionDisposable,
+      ];
+    },
+    [
+      applySelectedThreadHighlight,
+      applyThreadGutterDecorations,
+      handleCreateThread,
+    ]
+  );
 
   const handleEditorChange = useCallback(
     (nextValue) => {
-      const normalizedValue = nextValue ?? '';
+      const normalizedValue = nextValue ?? "";
       setCode(normalizedValue);
       setIsDirty(normalizedValue !== lastSavedContent);
     },
-    [lastSavedContent],
+    [lastSavedContent]
   );
+
+  const handleCreateThread = useCallback(async () => {
+    const editorInstance = editorRef.current;
+    const monaco = monacoRef.current;
+
+    if (!editorInstance || !monaco) {
+      setError("Editor is not ready yet. Please wait and try again.");
+      return;
+    }
+
+    if (!sessionId) {
+      setError("Session ID missing. Cannot create thread.");
+      return;
+    }
+
+    const selection = editorInstance.getSelection();
+    if (!selection || selection.isEmpty()) {
+      setError("Select code in the editor to start a thread.");
+      return;
+    }
+
+    const model = editorInstance.getModel();
+    if (!model) {
+      setError("Editor model unavailable. Please try again.");
+      return;
+    }
+
+    const startLine = selection.startLineNumber;
+    const endLine = selection.endLineNumber;
+    const selectedText = model.getValueInRange(selection);
+
+    try {
+      setCreatingThread(true);
+      setError("");
+
+      const payload = {
+        type: "block",
+        start_line: startLine,
+        end_line: endLine,
+        selected_text: selectedText,
+        anchor_status: "stable",
+      };
+
+      const response = await api.createThread(sessionId, payload);
+      const newThread = normalizeThreadEntity(response);
+
+      await fetchThreads();
+
+      if (newThread?.thread_id) {
+        setSelectedThreadId(newThread.thread_id);
+      }
+
+      editorInstance.revealRangeInCenter(
+        new monaco.Range(startLine, 1, endLine, 1)
+      );
+    } catch (err) {
+      const message =
+        err instanceof APIError
+          ? err.message || "Failed to create thread."
+          : "Failed to create thread. Please try again.";
+      setError(message);
+    } finally {
+      setCreatingThread(false);
+    }
+  }, [fetchThreads, normalizeThreadEntity, sessionId]);
 
   useEffect(() => {
     const handleBeforeUnload = (event) => {
@@ -255,11 +570,11 @@ export default function EditorPage() {
         return;
       }
       event.preventDefault();
-      event.returnValue = '';
+      event.returnValue = "";
     };
 
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [hasPendingChanges]);
 
   useEffect(() => {
@@ -268,13 +583,13 @@ export default function EditorPage() {
         return;
       }
       event.preventDefault();
-      window.history.pushState(null, '', editorUrlRef.current);
+      window.history.pushState(null, "", editorUrlRef.current);
       leaveActionRef.current = () => navigate(-1);
       setShowLeaveModal(true);
     };
 
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
   }, [hasPendingChanges, navigate]);
 
   const requestNavigation = useCallback(
@@ -286,7 +601,7 @@ export default function EditorPage() {
         action();
       }
     },
-    [hasPendingChanges],
+    [hasPendingChanges]
   );
 
   const handleLanguageChange = useCallback(
@@ -303,14 +618,14 @@ export default function EditorPage() {
 
       if (!session.version_number) {
         setError(
-          'Unable to update the language because the session metadata is out of sync. Please reload and try again.',
+          "Unable to update the language because the session metadata is out of sync. Please reload and try again."
         );
         setSelectedLanguage(previousLanguage);
         return;
       }
 
       const currentSessionLanguage = normalizeLanguageName(
-        session.language_override || session.language_detected,
+        session.language_override || session.language_detected
       );
 
       if (nextLanguage === currentSessionLanguage) {
@@ -319,7 +634,7 @@ export default function EditorPage() {
 
       try {
         setLanguageSaving(true);
-        setError('');
+        setError("");
 
         const payload = {
           language_override: nextLanguage,
@@ -344,14 +659,14 @@ export default function EditorPage() {
         setSelectedLanguage(previousLanguage);
         const message =
           err instanceof APIError
-            ? err.message || 'Failed to update language.'
-            : 'Failed to update language. Please try again.';
+            ? err.message || "Failed to update language."
+            : "Failed to update language. Please try again.";
         setError(message);
       } finally {
         setLanguageSaving(false);
       }
     },
-    [sessionId, session, selectedLanguage, normalizeSessionResponse],
+    [sessionId, session, selectedLanguage, normalizeSessionResponse]
   );
 
   useEffect(() => {
@@ -392,13 +707,13 @@ export default function EditorPage() {
   }, []);
 
   const handleNavigateToDashboard = useCallback(() => {
-    requestNavigation(() => navigate('/dashboard'));
+    requestNavigation(() => navigate("/dashboard"));
   }, [navigate, requestNavigation]);
 
   const handleNameChange = useCallback((event) => {
     setSessionName(event.target.value);
     setNameDirty(true);
-    setError('');
+    setError("");
   }, []);
 
   const handleNameCommit = useCallback(async () => {
@@ -407,12 +722,12 @@ export default function EditorPage() {
     }
 
     const trimmed = sessionName.trim();
-    const currentFilename = session.filename || '';
+    const currentFilename = session.filename || "";
 
     if (!trimmed) {
-      setSessionName(currentFilename || '');
+      setSessionName(currentFilename || "");
       setNameDirty(false);
-      setError('Session name cannot be empty.');
+      setError("Session name cannot be empty.");
       return;
     }
 
@@ -438,8 +753,8 @@ export default function EditorPage() {
     } catch (err) {
       const message =
         err instanceof APIError
-          ? err.message || 'Failed to rename session.'
-          : 'Failed to rename session. Please try again.';
+          ? err.message || "Failed to rename session."
+          : "Failed to rename session. Please try again.";
       setError(message);
       setSessionName(currentFilename);
     } finally {
@@ -454,18 +769,95 @@ export default function EditorPage() {
 
   const handleNameKeyDown = useCallback(
     (event) => {
-      if (event.key === 'Enter') {
+      if (event.key === "Enter") {
         event.preventDefault();
         event.currentTarget.blur();
       }
-      if (event.key === 'Escape') {
+      if (event.key === "Escape") {
         event.preventDefault();
-        setSessionName(session?.filename || '');
+        setSessionName(session?.filename || "");
         setNameDirty(false);
       }
     },
-    [session],
+    [session]
   );
+
+  const handleThreadSelect = useCallback(
+    (threadId) => {
+      const editorInstance = editorRef.current;
+      const monaco = monacoRef.current;
+
+      if (!editorInstance || !monaco) {
+        return;
+      }
+
+      const targetThread = threads.find(
+        (thread) => thread.thread_id === threadId
+      );
+
+      if (!targetThread) {
+        return;
+      }
+
+      setSelectedThreadId(threadId);
+
+      editorInstance.revealLineInCenter(targetThread.start_line);
+
+      const model = editorInstance.getModel();
+      if (!model) {
+        return;
+      }
+
+      const maxColumn = model.getLineMaxColumn(targetThread.end_line);
+      const selectionRange = new monaco.Range(
+        targetThread.start_line,
+        1,
+        targetThread.end_line,
+        maxColumn || 1
+      );
+      editorInstance.setSelection(selectionRange);
+    },
+    [threads]
+  );
+
+  useEffect(() => {
+    threadsRef.current = threads;
+  }, [threads]);
+
+  useEffect(() => {
+    selectedThreadIdRef.current = selectedThreadId;
+  }, [selectedThreadId]);
+
+  useEffect(() => {
+    applyThreadGutterDecorations();
+  }, [applyThreadGutterDecorations]);
+
+  useEffect(() => {
+    applySelectedThreadHighlight();
+  }, [applySelectedThreadHighlight]);
+
+  useEffect(() => {
+    return () => {
+      editorDisposablesRef.current.forEach((disposable) => {
+        if (disposable && typeof disposable.dispose === "function") {
+          disposable.dispose();
+        }
+      });
+      editorDisposablesRef.current = [];
+
+      if (editorRef.current) {
+        if (gutterDecorationsRef.current.length) {
+          editorRef.current.deltaDecorations(gutterDecorationsRef.current, []);
+        }
+        if (selectedThreadDecorationRef.current.length) {
+          editorRef.current.deltaDecorations(
+            selectedThreadDecorationRef.current,
+            []
+          );
+        }
+      }
+    };
+  }, []);
 
   if (loading) {
     return (
@@ -482,7 +874,7 @@ export default function EditorPage() {
     return (
       <div className="loading-page">
         <div className="error-state">
-          <p className="error-message">{error || 'Session not available.'}</p>
+          <p className="error-message">{error || "Session not available."}</p>
           <button
             type="button"
             className="btn btn-primary"
@@ -550,12 +942,12 @@ export default function EditorPage() {
           <button
             type="button"
             className={`btn btn-small ${
-              isDirty ? 'btn-primary' : 'btn-secondary'
+              isDirty ? "btn-primary" : "btn-secondary"
             }`}
             onClick={handleSave}
             disabled={saving || !isDirty}
           >
-            {saving ? 'Saving...' : isDirty ? 'Save' : 'Saved'}
+            {saving ? "Saving..." : isDirty ? "Save" : "Saved"}
           </button>
           <button
             type="button"
@@ -584,18 +976,25 @@ export default function EditorPage() {
             onChange={handleEditorChange}
             options={{
               fontSize: 14,
-              lineNumbers: 'on',
+              lineNumbers: "on",
               minimap: { enabled: true },
               scrollBeyondLastLine: false,
               automaticLayout: true,
               tabSize: 2,
               smoothScrolling: true,
+              glyphMargin: true,
             }}
           />
         </div>
-        <aside className="thread-panel-placeholder">
-          <p className="placeholder-text">Thread panel coming soon...</p>
-        </aside>
+        <ThreadSidebar
+          threads={threads}
+          loading={threadsLoading}
+          onThreadSelect={handleThreadSelect}
+          selectedThreadId={selectedThreadId}
+          onNewThread={handleCreateThread}
+          hasSelection={hasSelection}
+          creatingThread={creatingThread}
+        />
       </div>
 
       {showLeaveModal ? (
@@ -611,7 +1010,8 @@ export default function EditorPage() {
             </button>
             <h2 className="modal-title">Leave without saving?</h2>
             <p>
-              You have unsaved changes in this session. Leaving now will discard them.
+              You have unsaved changes in this session. Leaving now will discard
+              them.
             </p>
             <div className="modal-actions">
               <button
@@ -635,4 +1035,3 @@ export default function EditorPage() {
     </div>
   );
 }
-

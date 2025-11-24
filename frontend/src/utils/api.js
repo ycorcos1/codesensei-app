@@ -105,5 +105,26 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(payload),
     }),
+
+  getThreads: (sessionId) =>
+    request(`/sessions/${sessionId}/threads`, {
+      method: 'GET',
+    }),
+
+  createThread: (sessionId, payload) =>
+    request(`/sessions/${sessionId}/threads`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  getThread: (threadId) =>
+    request(`/threads/${threadId}`, {
+      method: 'GET',
+    }),
+
+  deleteThread: (threadId) =>
+    request(`/threads/${threadId}`, {
+      method: 'DELETE',
+    }),
 };
 

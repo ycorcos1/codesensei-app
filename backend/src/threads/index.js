@@ -357,6 +357,7 @@ async function handleListThreads(event) {
       type: item.type,
       start_line: item.start_line,
       end_line: item.end_line,
+      selected_text: item.selected_text || '',
       anchor_status: item.anchor_status || 'stable',
       created_at: item.created_at,
       updated_at: item.updated_at || item.created_at,
