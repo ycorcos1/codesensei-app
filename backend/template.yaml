@@ -313,6 +313,10 @@ Resources:
       Environment:
         Variables:
           AI_RATE_LIMIT_PER_MINUTE: '10'
+          BEDROCK_MODEL_ID: 'anthropic.claude-3-5-sonnet-20241022-v2:0'
+          BEDROCK_REGION: 'us-east-1'
+          BEDROCK_MAX_OUTPUT_TOKENS: '4000'
+          BEDROCK_TEMPERATURE: '0.7'
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref ThreadsTable
@@ -320,6 +324,12 @@ Resources:
             TableName: !Ref MessagesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref RateLimitsTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+              Resource: !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/*'
       Events:
         Analyze:
           Type: Api

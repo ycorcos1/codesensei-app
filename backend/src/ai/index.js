@@ -1,5 +1,10 @@
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
 const { DynamoDBDocumentClient, GetCommand } = require('@aws-sdk/lib-dynamodb');
+const {
+  BedrockRuntimeClient,
+  InvokeModelCommand,
+} = require('@aws-sdk/client-bedrock-runtime');
+const { TextDecoder } = require('util');
 
 const { authRequired } = require('./shared/auth-middleware');
 const { success, error } = require('./shared/response-helpers');
@@ -7,14 +12,27 @@ const { assertWithinRateLimit } = require('./shared/rate-limiter');
 const { normalizeString } = require('./shared/validators');
 
 const documentClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+const MAX_RETRIES = 3;
+const bedrockClient = new BedrockRuntimeClient({
+  region: process.env.BEDROCK_REGION || process.env.AWS_REGION || 'us-east-1',
+  maxAttempts: MAX_RETRIES,
+});
 
 const THREADS_TABLE = process.env.THREADS_TABLE;
 const AI_RATE_LIMIT_PER_MINUTE = Number(process.env.AI_RATE_LIMIT_PER_MINUTE || 10);
+const BEDROCK_MODEL_ID =
+  process.env.BEDROCK_MODEL_ID || 'anthropic.claude-3-5-sonnet-20241022-v2:0';
+const BEDROCK_REGION = process.env.BEDROCK_REGION || process.env.AWS_REGION || 'us-east-1';
+const BEDROCK_MAX_OUTPUT_TOKENS = Number(process.env.BEDROCK_MAX_OUTPUT_TOKENS || 4000);
+const BEDROCK_TEMPERATURE = Number(process.env.BEDROCK_TEMPERATURE || 0.7);
+const BEDROCK_TIMEOUT_MS = 30000;
+const FALLBACK_THRESHOLD_TOKENS = 80000;
+const MAX_INPUT_TOKENS = 100000;
+const CONTEXT_LINES_BUFFER = 50;
 
 const MAX_PROMPT_LENGTH = 5000;
 const MAX_CODE_BYTES = 5 * 1024 * 1024; // 5MB
 const MAX_HISTORY_ITEMS = 10;
-const CONTEXT_LOCAL_THRESHOLD_CHARS = 320000; // ~80k tokens
 
 if (!THREADS_TABLE) {
   console.warn('[ai] THREADS_TABLE environment variable is not set.');
@@ -111,10 +129,6 @@ function sanitizeHistory(history) {
   return trimmedHistory;
 }
 
-function determineContextMode(code = '') {
-  return code.length > CONTEXT_LOCAL_THRESHOLD_CHARS ? 'local' : 'full';
-}
-
 function estimateTokenCount({ code, prompt, history }) {
   const historyChars = history.reduce(
     (total, message) => total + (message.content?.length || 0),
@@ -125,36 +139,306 @@ function estimateTokenCount({ code, prompt, history }) {
   return Math.ceil(totalChars / 4) || 1;
 }
 
-function generateStubResponse(payload) {
-  const contextMode = determineContextMode(payload.code);
-  const previewPrompt =
-    payload.prompt.length > 100
-      ? `${payload.prompt.substring(0, 100).trimEnd()}…`
-      : payload.prompt;
+function extractLocalContext(code, selection) {
+  const lines = code.split('\n');
+  const startIndex = Math.max(0, selection.start_line - 1 - CONTEXT_LINES_BUFFER);
+  const endIndex = Math.min(lines.length, selection.end_line + CONTEXT_LINES_BUFFER);
+  const contextLines = lines.slice(startIndex, endIndex);
 
-  const selectionLabel = payload.selection
-    ? `Lines ${payload.selection.start_line}-${payload.selection.end_line}`
-    : 'Full file';
+  return {
+    code: contextLines.join('\n'),
+    actualStartLine: startIndex + 1,
+    actualEndLine: endIndex,
+  };
+}
 
-  const explanation = [
-    '**AI Analysis Stub**',
+function buildSystemPrompt(language, contextMode) {
+  const base = [
+    `You are an expert ${language} code reviewer.`,
+    'Provide precise analysis, actionable improvements, and code fixes when appropriate.',
+    'Always respond with VALID JSON only, matching exactly this schema:',
+    '{',
+    '  "explanation": "markdown string with your analysis",',
+    '  "suggested_code": "string with improved code or null",',
+    '  "patch": { "start_line": number, "end_line": number, "replacement": "string" } or null,',
+    '  "confidence": "high" | "medium" | "low"',
+    '}',
+    'Never include prose outside of the JSON object.',
+  ];
+
+  if (contextMode === 'local') {
+    base.push(
+      'The user only provided a portion of the file. When referencing line numbers, ALWAYS use the original file numbering as communicated in the prompt.',
+    );
+  }
+
+  return base.join('\n');
+}
+
+function buildUserPrompt({
+  code,
+  language,
+  selection,
+  prompt,
+  history,
+  contextMode,
+  actualStartLine,
+  actualEndLine,
+}) {
+  const historyText =
+    history.length > 0
+      ? `Previous conversation:\n${history
+          .map((entry) => `${entry.role.toUpperCase()}: ${entry.content}`)
+          .join('\n\n')}\n\n`
+      : '';
+
+  const selectionText = selection
+    ? `Selected region (lines ${selection.start_line}-${selection.end_line}):\n${
+        selection.selected_text || '(selection text not provided)'
+      }\n\n`
+    : 'Full file review requested.\n\n';
+
+  const contextNote =
+    contextMode === 'local'
+      ? `Context note: You are viewing lines ${actualStartLine}-${actualEndLine} from the original file. When you reference or return line numbers (e.g., in patch.start_line), use ORIGINAL file line numbers.\n\n`
+      : '';
+
+  const promptSections = [
+    `Language: ${language}`,
+    contextNote,
+    'Code snippet:',
+    '```',
+    code,
+    '```',
     '',
-    'This is a placeholder response. The real AWS Bedrock integration will arrive in Task 17.',
-    '',
-    '**Request Snapshot:**',
-    `- Language: ${payload.language}`,
-    `- Scope: ${selectionLabel}`,
-    `- Context Mode: ${contextMode === 'local' ? 'Local (selection + context)' : 'Full file'}`,
-    `- Prompt: "${previewPrompt}"`,
-  ].join('\n');
+    selectionText,
+    historyText,
+    `User question: ${prompt}`,
+  ];
+
+  return promptSections.filter((section) => section !== undefined).join('\n');
+}
+
+async function invokeBedrockWithRetry(prompt, systemPrompt) {
+  let attempt = 0;
+  let lastError;
+
+  while (attempt < MAX_RETRIES) {
+    attempt += 1;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), BEDROCK_TIMEOUT_MS);
+
+    try {
+      const command = new InvokeModelCommand({
+        modelId: BEDROCK_MODEL_ID,
+        contentType: 'application/json',
+        accept: 'application/json',
+        body: JSON.stringify({
+          anthropic_version: 'bedrock-2023-05-31',
+          max_tokens: BEDROCK_MAX_OUTPUT_TOKENS,
+          temperature: BEDROCK_TEMPERATURE,
+          system: systemPrompt,
+          messages: [
+            {
+              role: 'user',
+              content: [{ type: 'text', text: prompt }],
+            },
+          ],
+        }),
+      });
+
+      const response = await bedrockClient.send(command, {
+        abortSignal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      const rawBody = new TextDecoder().decode(response.body);
+      return JSON.parse(rawBody);
+    } catch (err) {
+      clearTimeout(timeoutId);
+      lastError = err;
+
+      if (err.name === 'AbortError' || err.message?.includes('timeout')) {
+        if (attempt >= MAX_RETRIES) {
+          const timeoutError = new Error('AI_TIMEOUT');
+          timeoutError.cause = err;
+          throw timeoutError;
+        }
+      } else if (
+        err.name === 'ThrottlingException' ||
+        err.$metadata?.httpStatusCode === 429 ||
+        err.name === 'TooManyRequestsException'
+      ) {
+        if (attempt >= MAX_RETRIES) {
+          const rateError = new Error('RATE_LIMIT_EXCEEDED');
+          rateError.cause = err;
+          throw rateError;
+        }
+      } else if (err.$metadata?.httpStatusCode >= 500) {
+        if (attempt >= MAX_RETRIES) {
+          const unavailableError = new Error('BEDROCK_UNAVAILABLE');
+          unavailableError.cause = err;
+          throw unavailableError;
+        }
+      } else {
+        throw err;
+      }
+
+      const backoff = Math.min(1000 * 2 ** (attempt - 1), 4000);
+      await new Promise((resolve) => setTimeout(resolve, backoff));
+    }
+  }
+
+  throw lastError || new Error('BEDROCK_UNAVAILABLE');
+}
+
+function extractResponseText(bedrockResponse) {
+  if (!bedrockResponse || !Array.isArray(bedrockResponse.content)) {
+    return '';
+  }
+
+  const textSegment = bedrockResponse.content.find((segment) => segment.type === 'text');
+  if (!textSegment || typeof textSegment.text !== 'string') {
+    return '';
+  }
+
+  return textSegment.text;
+}
+
+function parseBedrockResponse(bedrockResponse) {
+  const responseText = extractResponseText(bedrockResponse);
+
+  if (!responseText) {
+    throw new Error('AI_MALFORMED_RESPONSE');
+  }
+
+  let jsonPayload;
+  try {
+    const firstBrace = responseText.indexOf('{');
+    const lastBrace = responseText.lastIndexOf('}');
+    if (firstBrace === -1 || lastBrace === -1) {
+      throw new Error('NO_JSON_OBJECT');
+    }
+    jsonPayload = JSON.parse(responseText.slice(firstBrace, lastBrace + 1));
+  } catch (err) {
+    console.error('[ai] Failed to parse AI response JSON:', err, responseText);
+    throw new Error('AI_MALFORMED_RESPONSE');
+  }
+
+  const explanation =
+    typeof jsonPayload.explanation === 'string' && jsonPayload.explanation.trim()
+      ? jsonPayload.explanation
+      : responseText;
+
+  const suggestedCode =
+    jsonPayload.suggested_code === null ||
+    typeof jsonPayload.suggested_code === 'string'
+      ? jsonPayload.suggested_code
+      : null;
+
+  let patch = null;
+  if (
+    jsonPayload.patch &&
+    typeof jsonPayload.patch === 'object' &&
+    Number.isInteger(jsonPayload.patch.start_line) &&
+    Number.isInteger(jsonPayload.patch.end_line) &&
+    typeof jsonPayload.patch.replacement === 'string'
+  ) {
+    patch = {
+      start_line: jsonPayload.patch.start_line,
+      end_line: jsonPayload.patch.end_line,
+      replacement: jsonPayload.patch.replacement,
+    };
+  }
+
+  const confidence =
+    jsonPayload.confidence === 'high' ||
+    jsonPayload.confidence === 'medium' ||
+    jsonPayload.confidence === 'low'
+      ? jsonPayload.confidence
+      : 'medium';
 
   return {
     explanation,
-    suggested_code: null,
-    patch: null,
+    suggested_code: suggestedCode,
+    patch,
+    confidence,
+  };
+}
+
+async function callBedrock({ code, prompt, language, selection, history }) {
+  const baselineTokens = estimateTokenCount({ code, prompt, history });
+
+  let contextMode = 'full';
+  let effectiveCode = code;
+  let actualStartLine = 1;
+  let actualEndLine = code.split('\n').length;
+
+  if (baselineTokens > FALLBACK_THRESHOLD_TOKENS) {
+    if (!selection) {
+      throw new Error('TOKEN_LIMIT_EXCEEDED_NEEDS_SELECTION');
+    }
+
+    const localContext = extractLocalContext(code, selection);
+    contextMode = 'local';
+    effectiveCode = localContext.code;
+    actualStartLine = localContext.actualStartLine;
+    actualEndLine = localContext.actualEndLine;
+  }
+
+  const inputTokens = estimateTokenCount({ code: effectiveCode, prompt, history });
+  if (inputTokens > MAX_INPUT_TOKENS) {
+    throw new Error('TOKEN_LIMIT_EXCEEDED');
+  }
+
+  const systemPrompt = buildSystemPrompt(language, contextMode);
+  const userPrompt = buildUserPrompt({
+    code: effectiveCode,
+    language,
+    selection,
+    prompt,
+    history,
+    contextMode,
+    actualStartLine,
+    actualEndLine,
+  });
+
+  const bedrockResponse = await invokeBedrockWithRetry(userPrompt, systemPrompt);
+  const parsed = parseBedrockResponse(bedrockResponse);
+
+  let patch = parsed.patch;
+  if (contextMode === 'local' && patch) {
+    const snippetLineCount = effectiveCode.split('\n').length;
+    const appearsRelative =
+      patch.start_line >= 1 &&
+      patch.end_line >= patch.start_line &&
+      patch.end_line <= snippetLineCount &&
+      actualStartLine > 1;
+
+    if (appearsRelative) {
+      patch = {
+        ...patch,
+        start_line: patch.start_line + actualStartLine - 1,
+        end_line: patch.end_line + actualStartLine - 1,
+      };
+    }
+  }
+
+  const explanationLength = parsed.explanation?.length || 0;
+  const suggestedLength = parsed.suggested_code?.length || 0;
+  const replacementLength =
+    typeof patch?.replacement === 'string' ? patch.replacement.length : 0;
+  const outputTokens = Math.ceil(
+    (explanationLength + suggestedLength + replacementLength) / 4,
+  );
+
+  return {
+    explanation: parsed.explanation,
+    suggested_code: parsed.suggested_code,
+    patch,
+    confidence: parsed.confidence,
     context_mode: contextMode,
-    confidence: 'high',
-    token_count: estimateTokenCount(payload),
+    token_count: inputTokens + outputTokens,
   };
 }
 
@@ -307,15 +591,66 @@ async function handleAnalyze(event) {
       );
     }
 
-    const response = generateStubResponse({
-      code,
-      prompt,
-      language,
-      selection,
-      history,
-    });
+    try {
+      const response = await callBedrock({
+        code,
+        prompt,
+        language,
+        selection,
+        history,
+      });
 
-    return success(200, response);
+      return success(200, response);
+    } catch (err) {
+      console.error('[ai] Bedrock call failed:', err);
+
+      switch (err.message) {
+        case 'TOKEN_LIMIT_EXCEEDED_NEEDS_SELECTION':
+          return error(
+            400,
+            'TOKEN_LIMIT_EXCEEDED',
+            'This file is too large for a full analysis. Select a smaller code block and try again.',
+            'code',
+          );
+        case 'TOKEN_LIMIT_EXCEEDED':
+          return error(
+            400,
+            'TOKEN_LIMIT_EXCEEDED',
+            'This selection is too large for the AI context window. Reduce the selection and try again.',
+            'selection',
+          );
+        case 'AI_TIMEOUT':
+          return error(
+            504,
+            'AI_TIMEOUT',
+            'AI request timed out. Try with a smaller code selection.',
+          );
+        case 'AI_MALFORMED_RESPONSE':
+          return error(
+            502,
+            'AI_MALFORMED_RESPONSE',
+            'AI response could not be processed. Please try again.',
+          );
+        case 'RATE_LIMIT_EXCEEDED':
+          return error(
+            429,
+            'RATE_LIMIT_EXCEEDED',
+            'AI service is busy. Please try again in a moment.',
+          );
+        case 'BEDROCK_UNAVAILABLE':
+          return error(
+            503,
+            'BEDROCK_UNAVAILABLE',
+            'AI service is temporarily unavailable. Please try again later.',
+          );
+        default:
+          return error(
+            500,
+            'INTERNAL_ERROR',
+            'Failed to analyze code. Please try again later.',
+          );
+      }
+    }
   } catch (err) {
     console.error('[ai] Failed to handle analyze request:', err);
     return error(
