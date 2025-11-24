@@ -301,6 +301,32 @@ Resources:
             RestApiId: !Ref CodeSenseiApi
             Path: /threads/{thread_id}/messages
             Method: GET
+  AIFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'CodeSensei-AI-${Environment}'
+      CodeUri: src/ai/
+      Handler: index.handler
+      Description: AI analysis endpoint for CodeSensei
+      MemorySize: 512
+      Timeout: 30
+      Environment:
+        Variables:
+          AI_RATE_LIMIT_PER_MINUTE: '10'
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ThreadsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MessagesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RateLimitsTable
+      Events:
+        Analyze:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CodeSenseiApi
+            Path: /ai/analyze
+            Method: POST
   UsersTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -493,4 +519,9 @@ Outputs:
   RateLimitsTableName:
     Description: Rate limits DynamoDB table name
     Value: !Ref RateLimitsTable
+  AIFunctionArn:
+    Description: AI Lambda function ARN
+    Value: !GetAtt AIFunction.Arn
+    Export:
+      Name: !Sub 'CodeSensei-AIFunction-${Environment}'
 

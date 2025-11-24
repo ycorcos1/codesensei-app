@@ -7,6 +7,7 @@ import { useAuth } from "../context/AuthContext";
 
 const MAX_MESSAGE_LENGTH = 5000;
 const WARNING_THRESHOLD = 4500;
+const MAX_HISTORY_FOR_AI = 10;
 
 function formatRelativeTime(timestamp) {
   if (!timestamp) {
@@ -55,7 +56,12 @@ function normalizeMessagesResponse(payload) {
   return [];
 }
 
-export default function ThreadPanel({ thread, onClose }) {
+export default function ThreadPanel({
+  thread,
+  onClose,
+  sessionCode,
+  sessionLanguage,
+}) {
   const navigate = useNavigate();
   const { logout } = useAuth();
 
@@ -69,6 +75,11 @@ export default function ThreadPanel({ thread, onClose }) {
   const textareaRef = useRef(null);
 
   const threadId = thread?.thread_id;
+  const effectiveCode = typeof sessionCode === "string" ? sessionCode : "";
+  const effectiveLanguage =
+    typeof sessionLanguage === "string" && sessionLanguage.trim()
+      ? sessionLanguage.trim()
+      : "Plain Text";
 
   const scrollToBottom = useCallback((behavior = "auto") => {
     if (messagesEndRef.current) {
@@ -173,41 +184,109 @@ export default function ThreadPanel({ thread, onClose }) {
       _optimistic: true,
     };
 
+    const optimisticTimeline = [...messages, tempMessage];
+    let userMessageCreated = false;
+    let thinkingMessage = null;
+    let timelineWithUser = optimisticTimeline;
+
     try {
       setSending(true);
       setError("");
-      setMessages((prev) => [...prev, tempMessage]);
+      setMessages(optimisticTimeline);
       setUserInput("");
 
-      const payload = {
+      const createResponse = await api.createMessage(threadId, {
         role: "user",
         content: trimmed,
+      });
+      const createdMessage = createResponse?.message || createResponse;
+      userMessageCreated = true;
+
+      timelineWithUser = optimisticTimeline.map((message) =>
+        message.message_id === tempMessage.message_id ? createdMessage : message
+      );
+      setMessages(timelineWithUser);
+
+      const historyPayload = timelineWithUser
+        .slice(-MAX_HISTORY_FOR_AI)
+        .map((message) => ({
+          role: message.role,
+          content: message.content,
+        }));
+
+      thinkingMessage = {
+        message_id: `thinking-${Date.now()}`,
+        role: "ai",
+        content: "",
+        timestamp: new Date().toISOString(),
+        _thinking: true,
+      };
+      setMessages([...timelineWithUser, thinkingMessage]);
+
+      const selectionPayload =
+        thread?.type === "file" ||
+        typeof thread?.start_line !== "number" ||
+        typeof thread?.end_line !== "number"
+          ? undefined
+          : {
+              start_line: thread.start_line,
+              end_line: thread.end_line,
+              ...(typeof thread.selected_text === "string" &&
+              thread.selected_text.length
+                ? { selected_text: thread.selected_text }
+                : {}),
+            };
+
+      const aiResponse = await api.analyzeCode({
+        thread_id: threadId,
+        code: effectiveCode,
+        language: effectiveLanguage,
+        prompt: trimmed,
+        selection: selectionPayload,
+        history: historyPayload,
+      });
+
+      const aiMessagePayload = {
+        role: "ai",
+        content: aiResponse?.explanation || "",
       };
 
-      const response = await api.createMessage(threadId, payload);
-      const createdMessage = response?.message || response;
+      if (aiResponse?.context_mode) {
+        aiMessagePayload.context_mode = aiResponse.context_mode;
+      }
+
+      if (typeof aiResponse?.token_count === "number") {
+        aiMessagePayload.token_count = aiResponse.token_count;
+      }
+
+      const aiMessageResponse = await api.createMessage(
+        threadId,
+        aiMessagePayload
+      );
+      const aiMessage = aiMessageResponse?.message || aiMessageResponse;
 
       setMessages((prev) =>
         prev.map((message) =>
-          message.message_id === tempMessage.message_id ? createdMessage : message
+          message.message_id === (thinkingMessage?.message_id || "")
+            ? aiMessage
+            : message
         )
       );
-
-      const placeholderMessage = {
-        message_id: `placeholder-${Date.now()}`,
-        role: "ai",
-        content:
-          "AI is not connected yet. A response will appear here once the AI integration is enabled.",
-        timestamp: new Date().toISOString(),
-        _placeholder: true,
-      };
-
-      setMessages((prev) => [...prev, placeholderMessage]);
     } catch (err) {
-      setMessages((prev) =>
-        prev.filter((message) => message.message_id !== tempMessage.message_id)
-      );
-      setUserInput(trimmed);
+      if (!userMessageCreated) {
+        setMessages((prev) =>
+          prev.filter(
+            (message) => message.message_id !== tempMessage.message_id
+          )
+        );
+        setUserInput(trimmed);
+      } else if (thinkingMessage) {
+        setMessages((prev) =>
+          prev.filter(
+            (message) => message.message_id !== thinkingMessage.message_id
+          )
+        );
+      }
 
       if (err instanceof APIError && err.statusCode === 401) {
         await handleAuthFailure();
@@ -216,13 +295,22 @@ export default function ThreadPanel({ thread, onClose }) {
 
       const message =
         err instanceof APIError
-          ? err.message || "Failed to send message."
-          : "Failed to send message. Please try again.";
+          ? err.message || "Failed to process AI request."
+          : "Failed to process AI request. Please try again.";
       setError(message);
     } finally {
       setSending(false);
     }
-  }, [threadId, userInput, sending, handleAuthFailure]);
+  }, [
+    threadId,
+    userInput,
+    sending,
+    handleAuthFailure,
+    messages,
+    effectiveCode,
+    effectiveLanguage,
+    thread,
+  ]);
 
   const handleTextareaChange = useCallback((event) => {
     setUserInput(event.target.value);
@@ -305,14 +393,20 @@ export default function ThreadPanel({ thread, onClose }) {
                 key={message.message_id}
                 className={`message-item message-${message.role}`}
               >
-                <div className="message-content">{message.content}</div>
+                {message._thinking ? (
+                  <div className="message-content message-thinking">
+                    <div className="spinner" aria-hidden="true" />
+                    <span>AI is thinking...</span>
+                  </div>
+                ) : (
+                  <div className="message-content">{message.content}</div>
+                )}
                 <div className="message-timestamp">
-                  {formatRelativeTime(message.timestamp)}
+                  {message._thinking
+                    ? "Analyzing..."
+                    : formatRelativeTime(message.timestamp)}
                   {message.context_mode === "local" ? (
                     <span className="message-context-badge">Used local context</span>
-                  ) : null}
-                  {message._placeholder ? (
-                    <span className="message-context-badge">Placeholder</span>
                   ) : null}
                 </div>
               </li>
@@ -362,8 +456,11 @@ ThreadPanel.propTypes = {
     type: PropTypes.oneOf(["block", "file"]).isRequired,
     start_line: PropTypes.number.isRequired,
     end_line: PropTypes.number.isRequired,
+    selected_text: PropTypes.string,
     anchor_status: PropTypes.oneOf(["stable", "approximate"]).isRequired,
   }),
   onClose: PropTypes.func.isRequired,
+  sessionCode: PropTypes.string,
+  sessionLanguage: PropTypes.string,
 };
 

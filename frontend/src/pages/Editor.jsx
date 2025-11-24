@@ -1027,6 +1027,8 @@ export default function EditorPage() {
           <ThreadPanel
             thread={selectedThread}
             onClose={handleCloseThreadPanel}
+            sessionCode={code}
+            sessionLanguage={selectedLanguage}
           />
         ) : null}
       </div>

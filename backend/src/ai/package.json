@@ -1,0 +1,14 @@
+{
+  "name": "codesensei-ai",
+  "version": "1.0.0",
+  "description": "AI analysis Lambda for CodeSensei (stub implementation)",
+  "main": "index.js",
+  "license": "MIT",
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.700.0",
+    "@aws-sdk/lib-dynamodb": "^3.700.0",
+    "jsonwebtoken": "^9.0.2",
+    "uuid": "^9.0.1"
+  }
+}
+
