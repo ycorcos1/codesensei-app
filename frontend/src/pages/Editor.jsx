@@ -416,6 +416,71 @@ export default function EditorPage() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleSave]);
 
+  const handleCreateThread = useCallback(async () => {
+    const editorInstance = editorRef.current;
+    const monaco = monacoRef.current;
+
+    if (!editorInstance || !monaco) {
+      setError("Editor is not ready yet. Please wait and try again.");
+      return;
+    }
+
+    if (!sessionId) {
+      setError("Session ID missing. Cannot create thread.");
+      return;
+    }
+
+    const selection = editorInstance.getSelection();
+    if (!selection || selection.isEmpty()) {
+      setError("Select code in the editor to start a thread.");
+      return;
+    }
+
+    const model = editorInstance.getModel();
+    if (!model) {
+      setError("Editor model unavailable. Please try again.");
+      return;
+    }
+
+    const startLine = selection.startLineNumber;
+    const endLine = selection.endLineNumber;
+    const selectedText = model.getValueInRange(selection);
+
+    try {
+      setCreatingThread(true);
+      setError("");
+
+      const payload = {
+        type: "block",
+        start_line: startLine,
+        end_line: endLine,
+        selected_text: selectedText,
+        anchor_status: "stable",
+      };
+
+      const response = await api.createThread(sessionId, payload);
+      const newThread = normalizeThreadEntity(response);
+
+      await fetchThreads();
+
+      if (newThread?.thread_id) {
+        setSelectedThreadId(newThread.thread_id);
+      }
+
+      editorInstance.revealRangeInCenter(
+        new monaco.Range(startLine, 1, endLine, 1)
+      );
+    } catch (err) {
+      const message =
+        err instanceof APIError
+          ? err.message || "Failed to create thread."
+          : "Failed to create thread. Please try again.";
+      setError(message);
+    } finally {
+      setCreatingThread(false);
+    }
+  }, [fetchThreads, normalizeThreadEntity, sessionId]);
+
   const handleEditorDidMount = useCallback(
     (editorInstance, monacoInstance) => {
       editorRef.current = editorInstance;
@@ -498,71 +563,6 @@ export default function EditorPage() {
     },
     [lastSavedContent]
   );
-
-  const handleCreateThread = useCallback(async () => {
-    const editorInstance = editorRef.current;
-    const monaco = monacoRef.current;
-
-    if (!editorInstance || !monaco) {
-      setError("Editor is not ready yet. Please wait and try again.");
-      return;
-    }
-
-    if (!sessionId) {
-      setError("Session ID missing. Cannot create thread.");
-      return;
-    }
-
-    const selection = editorInstance.getSelection();
-    if (!selection || selection.isEmpty()) {
-      setError("Select code in the editor to start a thread.");
-      return;
-    }
-
-    const model = editorInstance.getModel();
-    if (!model) {
-      setError("Editor model unavailable. Please try again.");
-      return;
-    }
-
-    const startLine = selection.startLineNumber;
-    const endLine = selection.endLineNumber;
-    const selectedText = model.getValueInRange(selection);
-
-    try {
-      setCreatingThread(true);
-      setError("");
-
-      const payload = {
-        type: "block",
-        start_line: startLine,
-        end_line: endLine,
-        selected_text: selectedText,
-        anchor_status: "stable",
-      };
-
-      const response = await api.createThread(sessionId, payload);
-      const newThread = normalizeThreadEntity(response);
-
-      await fetchThreads();
-
-      if (newThread?.thread_id) {
-        setSelectedThreadId(newThread.thread_id);
-      }
-
-      editorInstance.revealRangeInCenter(
-        new monaco.Range(startLine, 1, endLine, 1)
-      );
-    } catch (err) {
-      const message =
-        err instanceof APIError
-          ? err.message || "Failed to create thread."
-          : "Failed to create thread. Please try again.";
-      setError(message);
-    } finally {
-      setCreatingThread(false);
-    }
-  }, [fetchThreads, normalizeThreadEntity, sessionId]);
 
   useEffect(() => {
     const handleBeforeUnload = (event) => {
