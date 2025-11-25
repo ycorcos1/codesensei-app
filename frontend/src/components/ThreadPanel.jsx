@@ -4,10 +4,41 @@ import { useNavigate } from "react-router-dom";
 
 import { api, APIError } from "../utils/api";
 import { useAuth } from "../context/AuthContext";
+import DiffModal from "./DiffModal";
 
 const MAX_MESSAGE_LENGTH = 5000;
 const WARNING_THRESHOLD = 4500;
 const MAX_HISTORY_FOR_AI = 10;
+
+const LANGUAGE_TO_MONACO = {
+  javascript: "javascript",
+  typescript: "typescript",
+  python: "python",
+  java: "java",
+  go: "go",
+  rust: "rust",
+  "c++": "cpp",
+  c: "c",
+  "c#": "csharp",
+  php: "php",
+  ruby: "ruby",
+  html: "html",
+  css: "css",
+  sql: "sql",
+  json: "json",
+  yaml: "yaml",
+  markdown: "markdown",
+  shell: "shell",
+  "plain text": "plaintext",
+};
+
+function toMonacoLanguage(languageName) {
+  if (!languageName || typeof languageName !== "string") {
+    return "plaintext";
+  }
+  const normalized = languageName.trim().toLowerCase();
+  return LANGUAGE_TO_MONACO[normalized] || "plaintext";
+}
 
 function formatRelativeTime(timestamp) {
   if (!timestamp) {
@@ -61,6 +92,7 @@ export default function ThreadPanel({
   onClose,
   sessionCode,
   sessionLanguage,
+  onApplyPatch,
 }) {
   const navigate = useNavigate();
   const { logout } = useAuth();
@@ -70,6 +102,9 @@ export default function ThreadPanel({
   const [error, setError] = useState("");
   const [userInput, setUserInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [messageExtras, setMessageExtras] = useState({});
+  const [diffState, setDiffState] = useState(null);
+  const [applyingPatch, setApplyingPatch] = useState(false);
 
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
@@ -135,6 +170,8 @@ export default function ThreadPanel({
     setUserInput("");
     setError("");
     setLoading(true);
+    setMessageExtras({});
+    setDiffState(null);
     fetchMessages();
 
     return () => {
@@ -246,6 +283,42 @@ export default function ThreadPanel({
         history: historyPayload,
       });
 
+      const aiExtras = {
+        context_mode:
+          typeof aiResponse?.context_mode === "string"
+            ? aiResponse.context_mode
+            : null,
+        confidence:
+          typeof aiResponse?.confidence === "string"
+            ? aiResponse.confidence
+            : null,
+      };
+
+      if (
+        typeof aiResponse?.suggested_code === "string" &&
+        aiResponse.suggested_code.trim()
+      ) {
+        aiExtras.suggested_code = aiResponse.suggested_code;
+      }
+
+      if (
+        aiResponse?.patch &&
+        typeof aiResponse.patch === "object" &&
+        Number.isInteger(aiResponse.patch.start_line) &&
+        Number.isInteger(aiResponse.patch.end_line) &&
+        typeof aiResponse.patch.replacement === "string"
+      ) {
+        aiExtras.patch = {
+          start_line: aiResponse.patch.start_line,
+          end_line: aiResponse.patch.end_line,
+          replacement: aiResponse.patch.replacement,
+        };
+      }
+
+      if (selectionPayload) {
+        aiExtras.selection = selectionPayload;
+      }
+
       const aiMessagePayload = {
         role: "ai",
         content: aiResponse?.explanation || "",
@@ -272,6 +345,14 @@ export default function ThreadPanel({
             : message
         )
       );
+      setMessageExtras((prev) => {
+        const next = { ...prev };
+        if (thinkingMessage?.message_id) {
+          delete next[thinkingMessage.message_id];
+        }
+        next[aiMessage.message_id] = aiExtras;
+        return next;
+      });
     } catch (err) {
       if (!userMessageCreated) {
         setMessages((prev) =>
@@ -286,6 +367,13 @@ export default function ThreadPanel({
             (message) => message.message_id !== thinkingMessage.message_id
           )
         );
+        setMessageExtras((prev) => {
+          const next = { ...prev };
+          if (thinkingMessage.message_id) {
+            delete next[thinkingMessage.message_id];
+          }
+          return next;
+        });
       }
 
       if (err instanceof APIError && err.statusCode === 401) {
@@ -325,6 +413,117 @@ export default function ThreadPanel({
     },
     [handleSendMessage]
   );
+
+  const handleCopySuggestedCode = useCallback(
+    async (messageId) => {
+      const extras = messageExtras[messageId];
+      const codeToCopy =
+        (extras?.suggested_code && extras.suggested_code.trim()) ||
+        (extras?.patch?.replacement && extras.patch.replacement);
+
+      if (!codeToCopy) {
+        setError("No suggested code available to copy.");
+        return;
+      }
+
+      try {
+        if (
+          typeof navigator === "undefined" ||
+          !navigator.clipboard ||
+          !navigator.clipboard.writeText
+        ) {
+          throw new Error("Clipboard API is not available");
+        }
+        await navigator.clipboard.writeText(codeToCopy);
+      } catch {
+        setError("Unable to copy to clipboard. Please copy manually.");
+      }
+    },
+    [messageExtras]
+  );
+
+  const handleViewDiff = useCallback(
+    (messageId) => {
+      const extras = messageExtras[messageId];
+      if (!extras) {
+        return;
+      }
+
+      const monacoLanguage = toMonacoLanguage(sessionLanguage);
+      const patch = extras.patch || null;
+      const suggested = extras.suggested_code || "";
+      let originalSnippet = "";
+      let modifiedSnippet = "";
+      let startLine;
+      let endLine;
+
+      if (patch) {
+        const { start_line: start, end_line: end, replacement } = patch;
+        const lines = (sessionCode || "").split("\n");
+        const safeStart = Math.max(1, Number(start) || 1);
+        const safeEnd = Math.max(safeStart, Number(end) || safeStart);
+        const sliceEnd = Math.min(safeEnd, lines.length);
+        originalSnippet =
+          sliceEnd >= safeStart
+            ? lines.slice(safeStart - 1, sliceEnd).join("\n")
+            : "";
+        modifiedSnippet = replacement;
+        startLine = safeStart;
+        endLine = safeEnd;
+      } else if (suggested) {
+        const selectionText =
+          typeof thread?.selected_text === "string" && thread.selected_text
+            ? thread.selected_text
+            : "";
+        originalSnippet = selectionText || sessionCode || "";
+        modifiedSnippet = suggested;
+        if (typeof thread?.start_line === "number") {
+          startLine = thread.start_line;
+        }
+        if (typeof thread?.end_line === "number") {
+          endLine = thread.end_line;
+        }
+      } else {
+        return;
+      }
+
+      setDiffState({
+        messageId,
+        originalCode: originalSnippet,
+        modifiedCode: modifiedSnippet,
+        language: monacoLanguage,
+        startLine,
+        endLine,
+        extras,
+      });
+    },
+    [messageExtras, sessionLanguage, sessionCode, thread]
+  );
+
+  const handleCloseDiff = useCallback(() => {
+    setDiffState(null);
+  }, []);
+
+  const handleApplyPatchFromDiff = useCallback(async () => {
+    if (!diffState?.extras?.patch || !onApplyPatch) {
+      return;
+    }
+
+    try {
+      setApplyingPatch(true);
+      setError("");
+      await onApplyPatch(diffState.extras.patch);
+      setDiffState(null);
+    } catch (applyError) {
+      const message =
+        applyError instanceof APIError
+          ? applyError.message || "Failed to apply patch."
+          : applyError?.message || "Failed to apply patch.";
+      setError(message);
+    } finally {
+      setApplyingPatch(false);
+    }
+  }, [diffState, onApplyPatch]);
 
   if (!thread) {
     return null;
@@ -388,29 +587,64 @@ export default function ThreadPanel({
           </div>
         ) : (
           <ul className="message-list">
-            {messages.map((message) => (
-              <li
-                key={message.message_id}
-                className={`message-item message-${message.role}`}
-              >
-                {message._thinking ? (
-                  <div className="message-content message-thinking">
-                    <div className="spinner" aria-hidden="true" />
-                    <span>AI is thinking...</span>
+            {messages.map((message) => {
+              const extras = messageExtras[message.message_id];
+              const hasDiff =
+                message.role === "ai" &&
+                Boolean(extras?.patch || extras?.suggested_code);
+              const canCopy =
+                message.role === "ai" &&
+                Boolean(
+                  (extras?.suggested_code && extras.suggested_code.trim()) ||
+                    extras?.patch?.replacement
+                );
+
+              return (
+                <li
+                  key={message.message_id}
+                  className={`message-item message-${message.role}`}
+                >
+                  {message._thinking ? (
+                    <div className="message-content message-thinking">
+                      <div className="spinner" aria-hidden="true" />
+                      <span>AI is thinking...</span>
+                    </div>
+                  ) : (
+                    <div className="message-content">{message.content}</div>
+                  )}
+                  <div className="message-timestamp">
+                    {message._thinking
+                      ? "Analyzing..."
+                      : formatRelativeTime(message.timestamp)}
+                    {message.context_mode === "local" ? (
+                      <span className="message-context-badge">
+                        Used local context
+                      </span>
+                    ) : null}
                   </div>
-                ) : (
-                  <div className="message-content">{message.content}</div>
-                )}
-                <div className="message-timestamp">
-                  {message._thinking
-                    ? "Analyzing..."
-                    : formatRelativeTime(message.timestamp)}
-                  {message.context_mode === "local" ? (
-                    <span className="message-context-badge">Used local context</span>
+                  {hasDiff ? (
+                    <div className="message-actions">
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-small"
+                        onClick={() => handleViewDiff(message.message_id)}
+                      >
+                        View Diff
+                      </button>
+                      {canCopy ? (
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-small"
+                          onClick={() => handleCopySuggestedCode(message.message_id)}
+                        >
+                          Copy Code
+                        </button>
+                      ) : null}
+                    </div>
                   ) : null}
-                </div>
-              </li>
-            ))}
+                </li>
+              );
+            })}
           </ul>
         )}
         <div ref={messagesEndRef} />
@@ -446,6 +680,20 @@ export default function ThreadPanel({
           </button>
         </div>
       </div>
+      <DiffModal
+        isOpen={Boolean(diffState)}
+        onClose={handleCloseDiff}
+        onApply={handleApplyPatchFromDiff}
+        originalCode={diffState?.originalCode || ""}
+        modifiedCode={diffState?.modifiedCode || ""}
+        language={
+          diffState?.language || toMonacoLanguage(sessionLanguage || "Plain Text")
+        }
+        startLine={diffState?.startLine}
+        endLine={diffState?.endLine}
+        isApplying={applyingPatch}
+        canApply={Boolean(diffState?.extras?.patch && onApplyPatch)}
+      />
     </aside>
   );
 }
@@ -462,5 +710,12 @@ ThreadPanel.propTypes = {
   onClose: PropTypes.func.isRequired,
   sessionCode: PropTypes.string,
   sessionLanguage: PropTypes.string,
+  onApplyPatch: PropTypes.func,
+};
+
+ThreadPanel.defaultProps = {
+  sessionCode: "",
+  sessionLanguage: "Plain Text",
+  onApplyPatch: null,
 };
 

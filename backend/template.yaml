@@ -1,4 +1,4 @@
-AWSTemplateFormatVersion: '2010-09-09'
+AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: CodeSensei Backend - Health Check Skeleton
 
@@ -16,14 +16,14 @@ Globals:
         THREADS_TABLE: !Ref ThreadsTable
         MESSAGES_TABLE: !Ref MessagesTable
         RATE_LIMITS_TABLE: !Ref RateLimitsTable
-        AUTH_RATE_LIMIT_PER_MINUTE: '5'
+        AUTH_RATE_LIMIT_PER_MINUTE: "5"
         CORS_ALLOWED_ORIGIN: !Ref CorsAllowedOrigin
-        JWT_ACCESS_EXPIRY: '15m'
-        JWT_REFRESH_EXPIRY: '7d'
+        JWT_ACCESS_EXPIRY: "15m"
+        JWT_REFRESH_EXPIRY: "7d"
         JWT_ISSUER: CodeSensei
         ACCESS_COOKIE_NAME: accessToken
         REFRESH_COOKIE_NAME: refreshToken
-        JWT_SECRET: !Sub '{{resolve:secretsmanager:CodeSensei-JWT-Secret-${Environment}:SecretString:secret}}'
+        JWT_SECRET: !Sub "{{resolve:secretsmanager:CodeSensei-JWT-Secret-${Environment}:SecretString:secret}}"
 
 Parameters:
   Environment:
@@ -43,7 +43,7 @@ Resources:
   CodeSenseiApi:
     Type: AWS::Serverless::Api
     Properties:
-      Name: !Sub 'CodeSensei-API-${Environment}'
+      Name: !Sub "CodeSensei-API-${Environment}"
       StageName: !Ref Environment
       Cors:
         AllowMethods: "'GET,POST,PUT,PATCH,DELETE,OPTIONS'"
@@ -56,7 +56,7 @@ Resources:
   HealthCheckFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub 'CodeSensei-HealthCheck-${Environment}'
+      FunctionName: !Sub "CodeSensei-HealthCheck-${Environment}"
       CodeUri: src/health/
       Handler: index.handler
       Description: Health check endpoint for CodeSensei
@@ -86,7 +86,7 @@ Resources:
   AuthFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub 'CodeSensei-Auth-${Environment}'
+      FunctionName: !Sub "CodeSensei-Auth-${Environment}"
       CodeUri: src/auth/
       Handler: index.handler
       Description: Authentication endpoints for CodeSensei
@@ -101,7 +101,7 @@ Resources:
               Action:
                 - secretsmanager:GetSecretValue
                 - secretsmanager:DescribeSecret
-              Resource: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:CodeSensei-JWT-Secret-${Environment}-*'
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:CodeSensei-JWT-Secret-${Environment}-*"
       Events:
         Signup:
           Type: Api
@@ -137,7 +137,7 @@ Resources:
   UsersFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub 'CodeSensei-Users-${Environment}'
+      FunctionName: !Sub "CodeSensei-Users-${Environment}"
       CodeUri: src/users/
       Handler: index.handler
       Description: User profile management endpoints for CodeSensei
@@ -186,7 +186,7 @@ Resources:
   SessionsFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub 'CodeSensei-Sessions-${Environment}'
+      FunctionName: !Sub "CodeSensei-Sessions-${Environment}"
       CodeUri: src/sessions/
       Handler: index.handler
       Description: Session management endpoints for CodeSensei
@@ -194,10 +194,10 @@ Resources:
       Timeout: 30
       Environment:
         Variables:
-          SESSION_SAVE_RATE_LIMIT_PER_MINUTE: '60'
-          SESSION_CREATE_RATE_LIMIT_PER_MINUTE: '20'
-          MAX_SESSIONS_PER_USER: '100'
-          MAX_SESSION_CODE_BYTES: '5242880'
+          SESSION_SAVE_RATE_LIMIT_PER_MINUTE: "60"
+          SESSION_CREATE_RATE_LIMIT_PER_MINUTE: "20"
+          MAX_SESSIONS_PER_USER: "100"
+          MAX_SESSION_CODE_BYTES: "5242880"
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref SessionsTable
@@ -262,7 +262,7 @@ Resources:
   ThreadsFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub 'CodeSensei-Threads-${Environment}'
+      FunctionName: !Sub "CodeSensei-Threads-${Environment}"
       CodeUri: src/threads/
       Handler: index.handler
       Description: Thread management endpoints for CodeSensei
@@ -270,7 +270,7 @@ Resources:
       Timeout: 20
       Environment:
         Variables:
-          MAX_THREADS_PER_SESSION: '50'
+          MAX_THREADS_PER_SESSION: "50"
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref ThreadsTable
@@ -322,7 +322,7 @@ Resources:
   MessagesFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub 'CodeSensei-Messages-${Environment}'
+      FunctionName: !Sub "CodeSensei-Messages-${Environment}"
       CodeUri: src/messages/
       Handler: index.handler
       Description: Message management endpoints for CodeSensei
@@ -330,7 +330,7 @@ Resources:
       Timeout: 20
       Environment:
         Variables:
-          MAX_MESSAGES_PER_THREAD: '500'
+          MAX_MESSAGES_PER_THREAD: "500"
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref MessagesTable
@@ -358,7 +358,7 @@ Resources:
   AIFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub 'CodeSensei-AI-${Environment}'
+      FunctionName: !Sub "CodeSensei-AI-${Environment}"
       CodeUri: src/ai/
       Handler: index.handler
       Description: AI analysis endpoint for CodeSensei
@@ -366,11 +366,11 @@ Resources:
       Timeout: 30
       Environment:
         Variables:
-          AI_RATE_LIMIT_PER_MINUTE: '10'
-          BEDROCK_MODEL_ID: 'anthropic.claude-3-5-sonnet-20241022-v1:0'
-          BEDROCK_REGION: 'us-east-1'
-          BEDROCK_MAX_OUTPUT_TOKENS: '4000'
-          BEDROCK_TEMPERATURE: '0.7'
+          AI_RATE_LIMIT_PER_MINUTE: "10"
+          BEDROCK_MODEL_ID: "anthropic.claude-3-sonnet-20240229-v1:0"
+          BEDROCK_REGION: "us-east-1"
+          BEDROCK_MAX_OUTPUT_TOKENS: "4000"
+          BEDROCK_TEMPERATURE: "0.7"
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref ThreadsTable
@@ -383,7 +383,7 @@ Resources:
               Action:
                 - bedrock:InvokeModel
                 - bedrock:InvokeModelWithResponseStream
-              Resource: !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/*'
+              Resource: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/*"
       Events:
         Analyze:
           Type: Api
@@ -400,7 +400,7 @@ Resources:
   UsersTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: !Sub 'CodeSensei-Users-${Environment}'
+      TableName: !Sub "CodeSensei-Users-${Environment}"
       BillingMode: PAY_PER_REQUEST
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
@@ -431,7 +431,7 @@ Resources:
   SessionsTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: !Sub 'CodeSensei-Sessions-${Environment}'
+      TableName: !Sub "CodeSensei-Sessions-${Environment}"
       BillingMode: PAY_PER_REQUEST
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
@@ -458,7 +458,7 @@ Resources:
   ThreadsTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: !Sub 'CodeSensei-Threads-${Environment}'
+      TableName: !Sub "CodeSensei-Threads-${Environment}"
       BillingMode: PAY_PER_REQUEST
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
@@ -485,7 +485,7 @@ Resources:
   MessagesTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: !Sub 'CodeSensei-Messages-${Environment}'
+      TableName: !Sub "CodeSensei-Messages-${Environment}"
       BillingMode: PAY_PER_REQUEST
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
@@ -503,7 +503,7 @@ Resources:
   RateLimitsTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: !Sub 'CodeSensei-RateLimits-${Environment}'
+      TableName: !Sub "CodeSensei-RateLimits-${Environment}"
       BillingMode: PAY_PER_REQUEST
       TimeToLiveSpecification:
         AttributeName: ttl
@@ -518,73 +518,73 @@ Resources:
 Outputs:
   ApiUrl:
     Description: API Gateway endpoint URL
-    Value: !Sub 'https://${CodeSenseiApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/'
+    Value: !Sub "https://${CodeSenseiApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/"
     Export:
-      Name: !Sub 'CodeSensei-ApiUrl-${Environment}'
+      Name: !Sub "CodeSensei-ApiUrl-${Environment}"
 
   HealthCheckEndpoint:
     Description: Health check endpoint
-    Value: !Sub 'https://${CodeSenseiApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/health'
+    Value: !Sub "https://${CodeSenseiApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/health"
 
   HealthCheckFunctionArn:
     Description: Health check Lambda ARN
     Value: !GetAtt HealthCheckFunction.Arn
     Export:
-      Name: !Sub 'CodeSensei-HealthCheckFunction-${Environment}'
+      Name: !Sub "CodeSensei-HealthCheckFunction-${Environment}"
 
   AuthFunctionArn:
     Description: Auth Lambda function ARN
     Value: !GetAtt AuthFunction.Arn
     Export:
-      Name: !Sub 'CodeSensei-AuthFunction-${Environment}'
+      Name: !Sub "CodeSensei-AuthFunction-${Environment}"
 
   UsersFunctionArn:
     Description: Users Lambda function ARN
     Value: !GetAtt UsersFunction.Arn
     Export:
-      Name: !Sub 'CodeSensei-UsersFunction-${Environment}'
+      Name: !Sub "CodeSensei-UsersFunction-${Environment}"
 
   SessionsFunctionArn:
     Description: Sessions Lambda function ARN
     Value: !GetAtt SessionsFunction.Arn
     Export:
-      Name: !Sub 'CodeSensei-SessionsFunction-${Environment}'
+      Name: !Sub "CodeSensei-SessionsFunction-${Environment}"
 
   UsersTableName:
     Description: Users DynamoDB table name
     Value: !Ref UsersTable
     Export:
-      Name: !Sub 'CodeSensei-UsersTable-${Environment}'
+      Name: !Sub "CodeSensei-UsersTable-${Environment}"
 
   SessionsTableName:
     Description: Sessions DynamoDB table name
     Value: !Ref SessionsTable
     Export:
-      Name: !Sub 'CodeSensei-SessionsTable-${Environment}'
+      Name: !Sub "CodeSensei-SessionsTable-${Environment}"
 
   ThreadsTableName:
     Description: Threads DynamoDB table name
     Value: !Ref ThreadsTable
     Export:
-      Name: !Sub 'CodeSensei-ThreadsTable-${Environment}'
+      Name: !Sub "CodeSensei-ThreadsTable-${Environment}"
 
   MessagesTableName:
     Description: Messages DynamoDB table name
     Value: !Ref MessagesTable
     Export:
-      Name: !Sub 'CodeSensei-MessagesTable-${Environment}'
+      Name: !Sub "CodeSensei-MessagesTable-${Environment}"
 
   ThreadsFunctionArn:
     Description: Threads Lambda function ARN
     Value: !GetAtt ThreadsFunction.Arn
     Export:
-      Name: !Sub 'CodeSensei-ThreadsFunction-${Environment}'
+      Name: !Sub "CodeSensei-ThreadsFunction-${Environment}"
 
   MessagesFunctionArn:
     Description: Messages Lambda function ARN
     Value: !GetAtt MessagesFunction.Arn
     Export:
-      Name: !Sub 'CodeSensei-MessagesFunction-${Environment}'
+      Name: !Sub "CodeSensei-MessagesFunction-${Environment}"
 
   RateLimitsTableName:
     Description: Rate limits DynamoDB table name
@@ -593,5 +593,4 @@ Outputs:
     Description: AI Lambda function ARN
     Value: !GetAtt AIFunction.Arn
     Export:
-      Name: !Sub 'CodeSensei-AIFunction-${Environment}'
-
+      Name: !Sub "CodeSensei-AIFunction-${Environment}"

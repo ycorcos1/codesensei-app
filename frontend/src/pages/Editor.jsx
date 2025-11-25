@@ -89,6 +89,7 @@ export default function EditorPage() {
   const selectedThreadIdRef = useRef(null);
   const leaveActionRef = useRef(null);
   const editorUrlRef = useRef(window.location.href);
+  const toastTimeoutRef = useRef(null);
 
   const [session, setSession] = useState(null);
   const [code, setCode] = useState("");
@@ -108,6 +109,7 @@ export default function EditorPage() {
   const [creatingThread, setCreatingThread] = useState(false);
   const [selectedThreadId, setSelectedThreadId] = useState(null);
   const [hasSelection, setHasSelection] = useState(false);
+  const [toast, setToast] = useState(null);
 
   const normalizeSessionResponse = useCallback(
     (payload) => payload?.session ?? payload ?? null,
@@ -350,6 +352,28 @@ export default function EditorPage() {
     setSelectedLanguage(normalizeLanguageName(sessionLanguage));
   }, [session]);
 
+  useEffect(() => {
+    if (!toast) {
+      return undefined;
+    }
+
+    if (toastTimeoutRef.current) {
+      clearTimeout(toastTimeoutRef.current);
+    }
+
+    toastTimeoutRef.current = setTimeout(() => {
+      setToast(null);
+      toastTimeoutRef.current = null;
+    }, toast.duration || 4000);
+
+    return () => {
+      if (toastTimeoutRef.current) {
+        clearTimeout(toastTimeoutRef.current);
+        toastTimeoutRef.current = null;
+      }
+    };
+  }, [toast]);
+
   const handleSave = useCallback(async () => {
     if (!sessionId || !session || saving) {
       return;
@@ -490,6 +514,139 @@ export default function EditorPage() {
       setCreatingThread(false);
     }
   }, [fetchThreads, normalizeThreadEntity, sessionId]);
+
+  const handleApplyPatch = useCallback(
+    async (patch) => {
+      const editorInstance = editorRef.current;
+      const monaco = monacoRef.current;
+
+      if (!patch || typeof patch.replacement !== "string") {
+        setError("Invalid patch payload received from AI.");
+        return;
+      }
+
+      if (!editorInstance || !monaco) {
+        setError("Editor is not ready yet. Please wait and try again.");
+        return;
+      }
+
+      const model = editorInstance.getModel();
+      if (!model) {
+        setError("Editor model is unavailable. Please reload and try again.");
+        return;
+      }
+
+      const startLine = Number(patch.start_line);
+      const endLine = Number(patch.end_line);
+
+      if (
+        !Number.isInteger(startLine) ||
+        !Number.isInteger(endLine) ||
+        startLine < 1 ||
+        endLine < startLine
+      ) {
+        setError(
+          "Unable to apply AI patch because the provided line numbers are invalid."
+        );
+        return;
+      }
+
+      const lineCount = model.getLineCount();
+      const boundedStart = Math.max(1, Math.min(startLine, lineCount));
+      const boundedEnd = Math.max(boundedStart, Math.min(endLine, lineCount));
+      const endColumn = model.getLineMaxColumn(boundedEnd) || 1;
+
+      const edits =
+        startLine > lineCount
+          ? [
+              {
+                range: new monaco.Range(
+                  lineCount,
+                  model.getLineMaxColumn(lineCount),
+                  lineCount,
+                  model.getLineMaxColumn(lineCount)
+                ),
+                text:
+                  (lineCount > 0 && model.getLineContent(lineCount).length > 0
+                    ? "\n"
+                    : "") + patch.replacement,
+                forceMoveMarkers: true,
+              },
+            ]
+          : [
+              {
+                range: new monaco.Range(boundedStart, 1, boundedEnd, endColumn),
+                text: patch.replacement,
+                forceMoveMarkers: true,
+              },
+            ];
+
+      editorInstance.pushUndoStop();
+      editorInstance.executeEdits("codesensei.aiPatch", edits);
+      editorInstance.pushUndoStop();
+
+      const updatedCode = model.getValue();
+      setCode(updatedCode);
+      setIsDirty(true);
+
+      if (!sessionId || !session) {
+        setError(
+          "Session context is unavailable. Reload the page and try again."
+        );
+        return;
+      }
+
+      if (!session.version_number) {
+        setError(
+          "Unable to save AI changes because the session metadata is out of sync. Please reload and try again."
+        );
+        return;
+      }
+
+      try {
+        setSaving(true);
+        setError("");
+
+        const payload = {
+          code_content: updatedCode,
+          expected_version_number: session.version_number,
+        };
+
+        const response = await api.updateSession(sessionId, payload);
+        const updatedSession = normalizeSessionResponse(response);
+
+        setSession((prev) => ({
+          ...(prev || {}),
+          ...(updatedSession || {}),
+          code_content: updatedCode,
+        }));
+        setLastSavedContent(updatedCode);
+        setIsDirty(false);
+        setToast({ type: "success", message: "Patch applied and saved" });
+      } catch (err) {
+        if (err instanceof APIError && err.statusCode === 401) {
+          await logout();
+          navigate("/login", { replace: true });
+          return;
+        }
+
+        if (err instanceof APIError && err.statusCode === 409) {
+          setError(
+            "Version conflict detected while applying the patch. Reload to view the latest changes."
+          );
+        } else {
+          const message =
+            err instanceof APIError
+              ? err.message || "Failed to save patched changes."
+              : "Failed to save patched changes. Please try again.";
+          setError(message);
+        }
+      } finally {
+        setSaving(false);
+      }
+    },
+    [sessionId, session, normalizeSessionResponse, logout, navigate]
+  );
 
   const handleEditorDidMount = useCallback(
     (editorInstance, monacoInstance) => {
@@ -679,6 +836,14 @@ export default function EditorPage() {
     [sessionId, session, selectedLanguage, normalizeSessionResponse]
   );
 
+  const handleDismissToast = useCallback(() => {
+    if (toastTimeoutRef.current) {
+      clearTimeout(toastTimeoutRef.current);
+      toastTimeoutRef.current = null;
+    }
+    setToast(null);
+  }, []);
+
   useEffect(() => {
     const monaco = monacoRef.current;
     const editorInstance = editorRef.current;
@@ -839,6 +1004,15 @@ export default function EditorPage() {
   }, [threads]);
 
   useEffect(() => {
+    return () => {
+      if (toastTimeoutRef.current) {
+        clearTimeout(toastTimeoutRef.current);
+        toastTimeoutRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     if (!selectedThreadId) {
       return;
     }
@@ -917,6 +1091,22 @@ export default function EditorPage() {
 
   return (
     <div className="editor-page">
+      {toast ? (
+        <div
+          className={`toast ${toast.type ? `toast-${toast.type}` : ""}`}
+          role="status"
+        >
+          <span className="toast-message">{toast.message}</span>
+          <button
+            type="button"
+            className="toast-close"
+            onClick={handleDismissToast}
+            aria-label="Dismiss notification"
+          >
+            ×
+          </button>
+        </div>
+      ) : null}
       <nav className="editor-nav">
         <div className="editor-nav-left">
           <img
@@ -1029,6 +1219,7 @@ export default function EditorPage() {
             onClose={handleCloseThreadPanel}
             sessionCode={code}
             sessionLanguage={selectedLanguage}
+            onApplyPatch={handleApplyPatch}
           />
         ) : null}
       </div>
