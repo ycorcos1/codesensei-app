@@ -1,29 +1,34 @@
-const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
-const { DynamoDBDocumentClient, GetCommand } = require('@aws-sdk/lib-dynamodb');
+const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
+const { DynamoDBDocumentClient, GetCommand } = require("@aws-sdk/lib-dynamodb");
 const {
   BedrockRuntimeClient,
   InvokeModelCommand,
-} = require('@aws-sdk/client-bedrock-runtime');
-const { TextDecoder } = require('util');
+} = require("@aws-sdk/client-bedrock-runtime");
+const { TextDecoder } = require("util");
 
-const { authRequired } = require('./shared/auth-middleware');
-const { success, error } = require('./shared/response-helpers');
-const { assertWithinRateLimit } = require('./shared/rate-limiter');
-const { normalizeString } = require('./shared/validators');
+const { authRequired } = require("./shared/auth-middleware");
+const { success, error } = require("./shared/response-helpers");
+const { assertWithinRateLimit } = require("./shared/rate-limiter");
+const { normalizeString } = require("./shared/validators");
 
 const documentClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const MAX_RETRIES = 3;
 const bedrockClient = new BedrockRuntimeClient({
-  region: process.env.BEDROCK_REGION || process.env.AWS_REGION || 'us-east-1',
+  region: process.env.BEDROCK_REGION || process.env.AWS_REGION || "us-east-1",
   maxAttempts: MAX_RETRIES,
 });
 
 const THREADS_TABLE = process.env.THREADS_TABLE;
-const AI_RATE_LIMIT_PER_MINUTE = Number(process.env.AI_RATE_LIMIT_PER_MINUTE || 10);
+const AI_RATE_LIMIT_PER_MINUTE = Number(
+  process.env.AI_RATE_LIMIT_PER_MINUTE || 10
+);
 const BEDROCK_MODEL_ID =
-  process.env.BEDROCK_MODEL_ID || 'anthropic.claude-3-5-sonnet-20241022-v2:0';
-const BEDROCK_REGION = process.env.BEDROCK_REGION || process.env.AWS_REGION || 'us-east-1';
-const BEDROCK_MAX_OUTPUT_TOKENS = Number(process.env.BEDROCK_MAX_OUTPUT_TOKENS || 4000);
+  process.env.BEDROCK_MODEL_ID || "anthropic.claude-3-5-sonnet-20241022-v2:0";
+const BEDROCK_REGION =
+  process.env.BEDROCK_REGION || process.env.AWS_REGION || "us-east-1";
+const BEDROCK_MAX_OUTPUT_TOKENS = Number(
+  process.env.BEDROCK_MAX_OUTPUT_TOKENS || 4000
+);
 const BEDROCK_TEMPERATURE = Number(process.env.BEDROCK_TEMPERATURE || 0.7);
 const BEDROCK_TIMEOUT_MS = 30000;
 const FALLBACK_THRESHOLD_TOKENS = 80000;
@@ -35,7 +40,7 @@ const MAX_CODE_BYTES = 5 * 1024 * 1024; // 5MB
 const MAX_HISTORY_ITEMS = 10;
 
 if (!THREADS_TABLE) {
-  console.warn('[ai] THREADS_TABLE environment variable is not set.');
+  console.warn("[ai] THREADS_TABLE environment variable is not set.");
 }
 
 function getUserIdFromEvent(event) {
@@ -50,7 +55,7 @@ function parseJsonBody(event) {
   try {
     return JSON.parse(event.body);
   } catch (err) {
-    throw new Error('INVALID_JSON');
+    throw new Error("INVALID_JSON");
   }
 }
 
@@ -59,7 +64,7 @@ async function fetchThreadById(threadId) {
     new GetCommand({
       TableName: THREADS_TABLE,
       Key: { thread_id: threadId },
-    }),
+    })
   );
 
   return result.Item;
@@ -70,23 +75,23 @@ function sanitizeSelection(rawSelection) {
     return undefined;
   }
 
-  if (typeof rawSelection !== 'object') {
-    throw new Error('INVALID_SELECTION');
+  if (typeof rawSelection !== "object") {
+    throw new Error("INVALID_SELECTION");
   }
 
   const startLine = Number(rawSelection.start_line);
   const endLine = Number(rawSelection.end_line);
 
   if (!Number.isInteger(startLine) || startLine < 1) {
-    throw new Error('INVALID_SELECTION_START');
+    throw new Error("INVALID_SELECTION_START");
   }
 
   if (!Number.isInteger(endLine) || endLine < startLine) {
-    throw new Error('INVALID_SELECTION_END');
+    throw new Error("INVALID_SELECTION_END");
   }
 
   const selectedText =
-    typeof rawSelection.selected_text === 'string'
+    typeof rawSelection.selected_text === "string"
       ? rawSelection.selected_text
       : undefined;
 
@@ -103,28 +108,30 @@ function sanitizeHistory(history) {
   }
 
   if (!Array.isArray(history)) {
-    throw new Error('INVALID_HISTORY');
+    throw new Error("INVALID_HISTORY");
   }
 
-  const trimmedHistory = history.slice(-MAX_HISTORY_ITEMS).map((entry, index) => {
-    if (!entry || typeof entry !== 'object') {
-      throw new Error(`INVALID_HISTORY_ENTRY_${index}`);
-    }
+  const trimmedHistory = history
+    .slice(-MAX_HISTORY_ITEMS)
+    .map((entry, index) => {
+      if (!entry || typeof entry !== "object") {
+        throw new Error(`INVALID_HISTORY_ENTRY_${index}`);
+      }
 
-    const role = normalizeString(entry.role).toLowerCase();
-    if (role !== 'user' && role !== 'ai') {
-      throw new Error(`INVALID_HISTORY_ROLE_${index}`);
-    }
+      const role = normalizeString(entry.role).toLowerCase();
+      if (role !== "user" && role !== "ai") {
+        throw new Error(`INVALID_HISTORY_ROLE_${index}`);
+      }
 
-    if (typeof entry.content !== 'string' || !entry.content.trim()) {
-      throw new Error(`INVALID_HISTORY_CONTENT_${index}`);
-    }
+      if (typeof entry.content !== "string" || !entry.content.trim()) {
+        throw new Error(`INVALID_HISTORY_CONTENT_${index}`);
+      }
 
-    return {
-      role,
-      content: entry.content,
-    };
-  });
+      return {
+        role,
+        content: entry.content,
+      };
+    });
 
   return trimmedHistory;
 }
@@ -132,7 +139,7 @@ function sanitizeHistory(history) {
 function estimateTokenCount({ code, prompt, history }) {
   const historyChars = history.reduce(
     (total, message) => total + (message.content?.length || 0),
-    0,
+    0
   );
   const totalChars = (code?.length || 0) + (prompt?.length || 0) + historyChars;
 
@@ -140,13 +147,19 @@ function estimateTokenCount({ code, prompt, history }) {
 }
 
 function extractLocalContext(code, selection) {
-  const lines = code.split('\n');
-  const startIndex = Math.max(0, selection.start_line - 1 - CONTEXT_LINES_BUFFER);
-  const endIndex = Math.min(lines.length, selection.end_line + CONTEXT_LINES_BUFFER);
+  const lines = code.split("\n");
+  const startIndex = Math.max(
+    0,
+    selection.start_line - 1 - CONTEXT_LINES_BUFFER
+  );
+  const endIndex = Math.min(
+    lines.length,
+    selection.end_line + CONTEXT_LINES_BUFFER
+  );
   const contextLines = lines.slice(startIndex, endIndex);
 
   return {
-    code: contextLines.join('\n'),
+    code: contextLines.join("\n"),
     actualStartLine: startIndex + 1,
     actualEndLine: endIndex,
   };
@@ -155,24 +168,24 @@ function extractLocalContext(code, selection) {
 function buildSystemPrompt(language, contextMode) {
   const base = [
     `You are an expert ${language} code reviewer.`,
-    'Provide precise analysis, actionable improvements, and code fixes when appropriate.',
-    'Always respond with VALID JSON only, matching exactly this schema:',
-    '{',
+    "Provide precise analysis, actionable improvements, and code fixes when appropriate.",
+    "Always respond with VALID JSON only, matching exactly this schema:",
+    "{",
     '  "explanation": "markdown string with your analysis",',
     '  "suggested_code": "string with improved code or null",',
     '  "patch": { "start_line": number, "end_line": number, "replacement": "string" } or null,',
     '  "confidence": "high" | "medium" | "low"',
-    '}',
-    'Never include prose outside of the JSON object.',
+    "}",
+    "Never include prose outside of the JSON object.",
   ];
 
-  if (contextMode === 'local') {
+  if (contextMode === "local") {
     base.push(
-      'The user only provided a portion of the file. When referencing line numbers, ALWAYS use the original file numbering as communicated in the prompt.',
+      "The user only provided a portion of the file. When referencing line numbers, ALWAYS use the original file numbering as communicated in the prompt."
     );
   }
 
-  return base.join('\n');
+  return base.join("\n");
 }
 
 function buildUserPrompt({
@@ -189,34 +202,34 @@ function buildUserPrompt({
     history.length > 0
       ? `Previous conversation:\n${history
           .map((entry) => `${entry.role.toUpperCase()}: ${entry.content}`)
-          .join('\n\n')}\n\n`
-      : '';
+          .join("\n\n")}\n\n`
+      : "";
 
   const selectionText = selection
-    ? `Selected region (lines ${selection.start_line}-${selection.end_line}):\n${
-        selection.selected_text || '(selection text not provided)'
-      }\n\n`
-    : 'Full file review requested.\n\n';
+    ? `Selected region (lines ${selection.start_line}-${
+        selection.end_line
+      }):\n${selection.selected_text || "(selection text not provided)"}\n\n`
+    : "Full file review requested.\n\n";
 
   const contextNote =
-    contextMode === 'local'
+    contextMode === "local"
       ? `Context note: You are viewing lines ${actualStartLine}-${actualEndLine} from the original file. When you reference or return line numbers (e.g., in patch.start_line), use ORIGINAL file line numbers.\n\n`
-      : '';
+      : "";
 
   const promptSections = [
     `Language: ${language}`,
     contextNote,
-    'Code snippet:',
-    '```',
+    "Code snippet:",
+    "```",
     code,
-    '```',
-    '',
+    "```",
+    "",
     selectionText,
     historyText,
     `User question: ${prompt}`,
   ];
 
-  return promptSections.filter((section) => section !== undefined).join('\n');
+  return promptSections.filter((section) => section !== undefined).join("\n");
 }
 
 async function invokeBedrockWithRetry(prompt, systemPrompt) {
@@ -231,17 +244,17 @@ async function invokeBedrockWithRetry(prompt, systemPrompt) {
     try {
       const command = new InvokeModelCommand({
         modelId: BEDROCK_MODEL_ID,
-        contentType: 'application/json',
-        accept: 'application/json',
+        contentType: "application/json",
+        accept: "application/json",
         body: JSON.stringify({
-          anthropic_version: 'bedrock-2023-05-31',
+          anthropic_version: "bedrock-2023-05-31",
           max_tokens: BEDROCK_MAX_OUTPUT_TOKENS,
           temperature: BEDROCK_TEMPERATURE,
           system: systemPrompt,
           messages: [
             {
-              role: 'user',
-              content: [{ type: 'text', text: prompt }],
+              role: "user",
+              content: [{ type: "text", text: prompt }],
             },
           ],
         }),
@@ -258,25 +271,25 @@ async function invokeBedrockWithRetry(prompt, systemPrompt) {
       clearTimeout(timeoutId);
       lastError = err;
 
-      if (err.name === 'AbortError' || err.message?.includes('timeout')) {
+      if (err.name === "AbortError" || err.message?.includes("timeout")) {
         if (attempt >= MAX_RETRIES) {
-          const timeoutError = new Error('AI_TIMEOUT');
+          const timeoutError = new Error("AI_TIMEOUT");
           timeoutError.cause = err;
           throw timeoutError;
         }
       } else if (
-        err.name === 'ThrottlingException' ||
+        err.name === "ThrottlingException" ||
         err.$metadata?.httpStatusCode === 429 ||
-        err.name === 'TooManyRequestsException'
+        err.name === "TooManyRequestsException"
       ) {
         if (attempt >= MAX_RETRIES) {
-          const rateError = new Error('RATE_LIMIT_EXCEEDED');
+          const rateError = new Error("RATE_LIMIT_EXCEEDED");
           rateError.cause = err;
           throw rateError;
         }
       } else if (err.$metadata?.httpStatusCode >= 500) {
         if (attempt >= MAX_RETRIES) {
-          const unavailableError = new Error('BEDROCK_UNAVAILABLE');
+          const unavailableError = new Error("BEDROCK_UNAVAILABLE");
           unavailableError.cause = err;
           throw unavailableError;
         }
@@ -289,17 +302,19 @@ async function invokeBedrockWithRetry(prompt, systemPrompt) {
     }
   }
 
-  throw lastError || new Error('BEDROCK_UNAVAILABLE');
+  throw lastError || new Error("BEDROCK_UNAVAILABLE");
 }
 
 function extractResponseText(bedrockResponse) {
   if (!bedrockResponse || !Array.isArray(bedrockResponse.content)) {
-    return '';
+    return "";
   }
 
-  const textSegment = bedrockResponse.content.find((segment) => segment.type === 'text');
-  if (!textSegment || typeof textSegment.text !== 'string') {
-    return '';
+  const textSegment = bedrockResponse.content.find(
+    (segment) => segment.type === "text"
+  );
+  if (!textSegment || typeof textSegment.text !== "string") {
+    return "";
   }
 
   return textSegment.text;
@@ -309,40 +324,41 @@ function parseBedrockResponse(bedrockResponse) {
   const responseText = extractResponseText(bedrockResponse);
 
   if (!responseText) {
-    throw new Error('AI_MALFORMED_RESPONSE');
+    throw new Error("AI_MALFORMED_RESPONSE");
   }
 
   let jsonPayload;
   try {
-    const firstBrace = responseText.indexOf('{');
-    const lastBrace = responseText.lastIndexOf('}');
+    const firstBrace = responseText.indexOf("{");
+    const lastBrace = responseText.lastIndexOf("}");
     if (firstBrace === -1 || lastBrace === -1) {
-      throw new Error('NO_JSON_OBJECT');
+      throw new Error("NO_JSON_OBJECT");
     }
     jsonPayload = JSON.parse(responseText.slice(firstBrace, lastBrace + 1));
   } catch (err) {
-    console.error('[ai] Failed to parse AI response JSON:', err, responseText);
-    throw new Error('AI_MALFORMED_RESPONSE');
+    console.error("[ai] Failed to parse AI response JSON:", err, responseText);
+    throw new Error("AI_MALFORMED_RESPONSE");
   }
 
   const explanation =
-    typeof jsonPayload.explanation === 'string' && jsonPayload.explanation.trim()
+    typeof jsonPayload.explanation === "string" &&
+    jsonPayload.explanation.trim()
       ? jsonPayload.explanation
       : responseText;
 
   const suggestedCode =
     jsonPayload.suggested_code === null ||
-    typeof jsonPayload.suggested_code === 'string'
+    typeof jsonPayload.suggested_code === "string"
       ? jsonPayload.suggested_code
       : null;
 
   let patch = null;
   if (
     jsonPayload.patch &&
-    typeof jsonPayload.patch === 'object' &&
+    typeof jsonPayload.patch === "object" &&
     Number.isInteger(jsonPayload.patch.start_line) &&
     Number.isInteger(jsonPayload.patch.end_line) &&
-    typeof jsonPayload.patch.replacement === 'string'
+    typeof jsonPayload.patch.replacement === "string"
   ) {
     patch = {
       start_line: jsonPayload.patch.start_line,
@@ -352,11 +368,11 @@ function parseBedrockResponse(bedrockResponse) {
   }
 
   const confidence =
-    jsonPayload.confidence === 'high' ||
-    jsonPayload.confidence === 'medium' ||
-    jsonPayload.confidence === 'low'
+    jsonPayload.confidence === "high" ||
+    jsonPayload.confidence === "medium" ||
+    jsonPayload.confidence === "low"
       ? jsonPayload.confidence
-      : 'medium';
+      : "medium";
 
   return {
     explanation,
@@ -369,26 +385,30 @@ function parseBedrockResponse(bedrockResponse) {
 async function callBedrock({ code, prompt, language, selection, history }) {
   const baselineTokens = estimateTokenCount({ code, prompt, history });
 
-  let contextMode = 'full';
+  let contextMode = "full";
   let effectiveCode = code;
   let actualStartLine = 1;
-  let actualEndLine = code.split('\n').length;
+  let actualEndLine = code.split("\n").length;
 
   if (baselineTokens > FALLBACK_THRESHOLD_TOKENS) {
     if (!selection) {
-      throw new Error('TOKEN_LIMIT_EXCEEDED_NEEDS_SELECTION');
+      throw new Error("TOKEN_LIMIT_EXCEEDED_NEEDS_SELECTION");
     }
 
     const localContext = extractLocalContext(code, selection);
-    contextMode = 'local';
+    contextMode = "local";
     effectiveCode = localContext.code;
     actualStartLine = localContext.actualStartLine;
     actualEndLine = localContext.actualEndLine;
   }
 
-  const inputTokens = estimateTokenCount({ code: effectiveCode, prompt, history });
+  const inputTokens = estimateTokenCount({
+    code: effectiveCode,
+    prompt,
+    history,
+  });
   if (inputTokens > MAX_INPUT_TOKENS) {
-    throw new Error('TOKEN_LIMIT_EXCEEDED');
+    throw new Error("TOKEN_LIMIT_EXCEEDED");
   }
 
   const systemPrompt = buildSystemPrompt(language, contextMode);
@@ -403,12 +423,30 @@ async function callBedrock({ code, prompt, language, selection, history }) {
     actualEndLine,
   });
 
-  const bedrockResponse = await invokeBedrockWithRetry(userPrompt, systemPrompt);
+  const bedrockResponse = await invokeBedrockWithRetry(
+    userPrompt,
+    systemPrompt
+  );
   const parsed = parseBedrockResponse(bedrockResponse);
 
   let patch = parsed.patch;
-  if (contextMode === 'local' && patch) {
-    const snippetLineCount = effectiveCode.split('\n').length;
+  if (
+    !patch &&
+    selection &&
+    Number.isInteger(selection.start_line) &&
+    Number.isInteger(selection.end_line) &&
+    typeof parsed.suggested_code === "string" &&
+    parsed.suggested_code.trim().length > 0
+  ) {
+    patch = {
+      start_line: selection.start_line,
+      end_line: selection.end_line,
+      replacement: parsed.suggested_code.trim(),
+    };
+  }
+
+  if (contextMode === "local" && patch) {
+    const snippetLineCount = effectiveCode.split("\n").length;
     const appearsRelative =
       patch.start_line >= 1 &&
       patch.end_line >= patch.start_line &&
@@ -427,9 +465,9 @@ async function callBedrock({ code, prompt, language, selection, history }) {
   const explanationLength = parsed.explanation?.length || 0;
   const suggestedLength = parsed.suggested_code?.length || 0;
   const replacementLength =
-    typeof patch?.replacement === 'string' ? patch.replacement.length : 0;
+    typeof patch?.replacement === "string" ? patch.replacement.length : 0;
   const outputTokens = Math.ceil(
-    (explanationLength + suggestedLength + replacementLength) / 4,
+    (explanationLength + suggestedLength + replacementLength) / 4
   );
 
   return {
@@ -445,20 +483,20 @@ async function callBedrock({ code, prompt, language, selection, history }) {
 async function handleAnalyze(event) {
   const userId = getUserIdFromEvent(event);
   if (!userId) {
-    return error(401, 'UNAUTHORIZED', 'Authentication required');
+    return error(401, "UNAUTHORIZED", "Authentication required");
   }
 
   const withinLimit = await assertWithinRateLimit(
     event,
     `ai_analyze#${userId}`,
-    AI_RATE_LIMIT_PER_MINUTE,
+    AI_RATE_LIMIT_PER_MINUTE
   );
 
   if (!withinLimit) {
     return error(
       429,
-      'RATE_LIMIT_EXCEEDED',
-      'Too many AI requests. Please try again in a minute.',
+      "RATE_LIMIT_EXCEEDED",
+      "Too many AI requests. Please try again in a minute."
     );
   }
 
@@ -466,65 +504,45 @@ async function handleAnalyze(event) {
   try {
     payload = parseJsonBody(event);
   } catch (err) {
-    return error(400, 'INVALID_INPUT', 'Malformed JSON body.');
+    return error(400, "INVALID_INPUT", "Malformed JSON body.");
   }
 
   const rawThreadId = normalizeString(payload.thread_id || payload.threadId);
   if (!rawThreadId) {
-    return error(
-      400,
-      'INVALID_INPUT',
-      'thread_id is required.',
-      'thread_id',
-    );
+    return error(400, "INVALID_INPUT", "thread_id is required.", "thread_id");
   }
 
   const code = payload.code;
-  if (typeof code !== 'string') {
-    return error(
-      400,
-      'INVALID_INPUT',
-      'code must be a string value.',
-      'code',
-    );
+  if (typeof code !== "string") {
+    return error(400, "INVALID_INPUT", "code must be a string value.", "code");
   }
 
-  const codeBytes = Buffer.byteLength(code, 'utf8');
+  const codeBytes = Buffer.byteLength(code, "utf8");
   if (codeBytes > MAX_CODE_BYTES) {
     return error(
       400,
-      'FILE_TOO_LARGE',
-      'Code payload exceeds the 5MB limit.',
-      'code',
+      "FILE_TOO_LARGE",
+      "Code payload exceeds the 5MB limit.",
+      "code"
     );
   }
 
   const language = normalizeString(payload.language);
   if (!language) {
-    return error(
-      400,
-      'INVALID_INPUT',
-      'language is required.',
-      'language',
-    );
+    return error(400, "INVALID_INPUT", "language is required.", "language");
   }
 
-  if (typeof payload.prompt !== 'string' || !payload.prompt.trim()) {
-    return error(
-      400,
-      'INVALID_INPUT',
-      'prompt is required.',
-      'prompt',
-    );
+  if (typeof payload.prompt !== "string" || !payload.prompt.trim()) {
+    return error(400, "INVALID_INPUT", "prompt is required.", "prompt");
   }
 
   const prompt = payload.prompt.trim();
   if (prompt.length > MAX_PROMPT_LENGTH) {
     return error(
       400,
-      'MESSAGE_TOO_LONG',
+      "MESSAGE_TOO_LONG",
       `Prompt must be ${MAX_PROMPT_LENGTH} characters or fewer.`,
-      'prompt',
+      "prompt"
     );
   }
 
@@ -533,33 +551,33 @@ async function handleAnalyze(event) {
     selection = sanitizeSelection(payload.selection);
   } catch (err) {
     switch (err.message) {
-      case 'INVALID_SELECTION':
+      case "INVALID_SELECTION":
         return error(
           400,
-          'INVALID_INPUT',
-          'selection must be an object with start_line and end_line.',
-          'selection',
+          "INVALID_INPUT",
+          "selection must be an object with start_line and end_line.",
+          "selection"
         );
-      case 'INVALID_SELECTION_START':
+      case "INVALID_SELECTION_START":
         return error(
           400,
-          'INVALID_INPUT',
-          'selection.start_line must be a positive integer.',
-          'selection.start_line',
+          "INVALID_INPUT",
+          "selection.start_line must be a positive integer.",
+          "selection.start_line"
         );
-      case 'INVALID_SELECTION_END':
+      case "INVALID_SELECTION_END":
         return error(
           400,
-          'INVALID_INPUT',
-          'selection.end_line must be an integer greater than or equal to start_line.',
-          'selection.end_line',
+          "INVALID_INPUT",
+          "selection.end_line must be an integer greater than or equal to start_line.",
+          "selection.end_line"
         );
       default:
         return error(
           400,
-          'INVALID_INPUT',
-          'Invalid selection payload.',
-          'selection',
+          "INVALID_INPUT",
+          "Invalid selection payload.",
+          "selection"
         );
     }
   }
@@ -570,9 +588,9 @@ async function handleAnalyze(event) {
   } catch (err) {
     return error(
       400,
-      'INVALID_INPUT',
-      'history must be an array of { role, content } items.',
-      'history',
+      "INVALID_INPUT",
+      "history must be an array of { role, content } items.",
+      "history"
     );
   }
 
@@ -580,83 +598,79 @@ async function handleAnalyze(event) {
     const thread = await fetchThreadById(rawThreadId);
 
     if (!thread) {
-      return error(404, 'THREAD_NOT_FOUND', 'Thread not found.');
+      return error(404, "THREAD_NOT_FOUND", "Thread not found.");
     }
 
     if (thread.user_id !== userId) {
-      return error(
-        403,
-        'FORBIDDEN',
-        'You do not have access to this thread.',
-      );
+      return error(403, "FORBIDDEN", "You do not have access to this thread.");
     }
 
     try {
       const response = await callBedrock({
-      code,
-      prompt,
-      language,
-      selection,
-      history,
-    });
+        code,
+        prompt,
+        language,
+        selection,
+        history,
+      });
 
-    return success(200, response);
+      return success(200, response);
     } catch (err) {
-      console.error('[ai] Bedrock call failed:', err);
+      console.error("[ai] Bedrock call failed:", err);
 
       switch (err.message) {
-        case 'TOKEN_LIMIT_EXCEEDED_NEEDS_SELECTION':
+        case "TOKEN_LIMIT_EXCEEDED_NEEDS_SELECTION":
           return error(
             400,
-            'TOKEN_LIMIT_EXCEEDED',
-            'This file is too large for a full analysis. Select a smaller code block and try again.',
-            'code',
+            "TOKEN_LIMIT_EXCEEDED",
+            "This file is too large for a full analysis. Select a smaller code block and try again.",
+            "code"
           );
-        case 'TOKEN_LIMIT_EXCEEDED':
+        case "TOKEN_LIMIT_EXCEEDED":
           return error(
             400,
-            'TOKEN_LIMIT_EXCEEDED',
-            'This selection is too large for the AI context window. Reduce the selection and try again.',
-            'selection',
+            "TOKEN_LIMIT_EXCEEDED",
+            "This selection is too large for the AI context window. Reduce the selection and try again.",
+            "selection"
           );
-        case 'AI_TIMEOUT':
+        case "AI_TIMEOUT":
           return error(
             504,
-            'AI_TIMEOUT',
-            'AI request timed out. Try with a smaller code selection.',
+            "AI_TIMEOUT",
+            "AI request timed out. Try with a smaller code selection."
           );
-        case 'AI_MALFORMED_RESPONSE':
+        case "AI_MALFORMED_RESPONSE":
           return error(
             502,
-            'AI_MALFORMED_RESPONSE',
-            'AI response could not be processed. Please try again.',
+            "AI_MALFORMED_RESPONSE",
+            "AI response could not be processed. Please try again."
           );
-        case 'RATE_LIMIT_EXCEEDED':
+        case "RATE_LIMIT_EXCEEDED":
           return error(
             429,
-            'RATE_LIMIT_EXCEEDED',
-            'AI service is busy. Please try again in a moment.',
+            "RATE_LIMIT_EXCEEDED",
+            "AI service is busy. Please try again in a moment."
           );
-        case 'BEDROCK_UNAVAILABLE':
+        case "BEDROCK_UNAVAILABLE":
           return error(
             503,
-            'BEDROCK_UNAVAILABLE',
-            'AI service is temporarily unavailable. Please try again later.',
+            "BEDROCK_UNAVAILABLE",
+            "AI service is temporarily unavailable. Please try again later."
           );
         default:
           return error(
             500,
-            'INTERNAL_ERROR',
-            'Failed to analyze code. Please try again later.',
+            "INTERNAL_ERROR",
+            "Failed to analyze code. Please try again later."
           );
       }
     }
   } catch (err) {
-    console.error('[ai] Failed to handle analyze request:', err);
+    console.error("[ai] Failed to handle analyze request:", err);
     return error(
       500,
-      'INTERNAL_ERROR',
-      'Failed to analyze code. Please try again later.',
+      "INTERNAL_ERROR",
+      "Failed to analyze code. Please try again later."
     );
   }
 }
@@ -666,32 +680,31 @@ async function router(event) {
   const resource =
     event.resource || event.requestContext?.resourcePath || event.path;
 
-  if (method === 'OPTIONS') {
+  if (method === "OPTIONS") {
     return success(204, {});
   }
 
-  if (method === 'POST' && resource === '/ai/analyze') {
+  if (method === "POST" && resource === "/ai/analyze") {
     return handleAnalyze(event);
   }
 
-  const normalizedPath = (event.path || '').toLowerCase();
-  if (method === 'POST' && normalizedPath.endsWith('/ai/analyze')) {
+  const normalizedPath = (event.path || "").toLowerCase();
+  if (method === "POST" && normalizedPath.endsWith("/ai/analyze")) {
     return handleAnalyze(event);
   }
 
-  return error(404, 'NOT_FOUND', 'Endpoint not found.');
+  return error(404, "NOT_FOUND", "Endpoint not found.");
 }
 
 exports.handler = authRequired(async (event, context) => {
   try {
     return await router(event, context);
   } catch (err) {
-    console.error('[ai] Unexpected error:', err);
+    console.error("[ai] Unexpected error:", err);
     return error(
       500,
-      'INTERNAL_ERROR',
-      'Something went wrong. Please try again later.',
+      "INTERNAL_ERROR",
+      "Something went wrong. Please try again later."
     );
   }
 });
-
