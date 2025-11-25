@@ -6,11 +6,14 @@ import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import Settings from "./pages/Settings";
 import Editor from "./pages/Editor";
+import About from "./pages/About";
+import Landing from "./pages/Landing";
 
 function App() {
   return (
     <Routes>
-      <Route path="/" element={<HealthCheck />} />
+      <Route path="/" element={<Landing />} />
+      <Route path="/about" element={<About />} />
       <Route path="/login" element={<Login />} />
       <Route path="/signup" element={<Signup />} />
       <Route
