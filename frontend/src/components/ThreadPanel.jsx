@@ -442,7 +442,7 @@ export default function ThreadPanel({
             onClick={handleSendMessage}
             disabled={!userInput.trim() || isOverLimit || sending}
           >
-            {sending ? "Analyzing..." : "Ask AI"}
+            {sending ? "Analyzing..." : "Send"}
           </button>
         </div>
       </div>

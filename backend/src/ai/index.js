@@ -593,14 +593,14 @@ async function handleAnalyze(event) {
 
     try {
       const response = await callBedrock({
-        code,
-        prompt,
-        language,
-        selection,
-        history,
-      });
+      code,
+      prompt,
+      language,
+      selection,
+      history,
+    });
 
-      return success(200, response);
+    return success(200, response);
     } catch (err) {
       console.error('[ai] Bedrock call failed:', err);
 

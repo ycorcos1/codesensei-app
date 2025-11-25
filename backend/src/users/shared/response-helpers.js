@@ -23,11 +23,13 @@ function resolveAllowedOrigin(requestOrigin) {
 
 function buildCorsHeaders(requestOrigin, extra = {}) {
   return {
+    ...extra,
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': resolveAllowedOrigin(requestOrigin),
     'Access-Control-Allow-Credentials': 'true',
+    'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type,Authorization,X-Requested-With,Cookie',
     Vary: 'Origin',
-    ...extra,
   };
 }
 

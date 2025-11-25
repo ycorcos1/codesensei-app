@@ -1278,16 +1278,26 @@ a:hover {
 }
 
 .message-user .message-content {
-  align-self: flex-start;
+  align-self: flex-end;
   background-color: var(--near-black);
   color: var(--light-gray);
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.message-ai .message-content {
+.message-user .message-timestamp {
   align-self: flex-end;
+  text-align: right;
+}
+
+.message-ai .message-content {
+  align-self: flex-start;
   background-color: var(--blood-orange);
   color: #ffffff;
+}
+
+.message-ai .message-timestamp {
+  align-self: flex-start;
+  text-align: left;
 }
 
 .message-content {

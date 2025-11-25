@@ -127,6 +127,12 @@ Resources:
             RestApiId: !Ref CodeSenseiApi
             Path: /auth/refresh
             Method: POST
+        AuthOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CodeSenseiApi
+            Path: /auth/{proxy+}
+            Method: OPTIONS
 
   UsersFunction:
     Type: AWS::Serverless::Function
@@ -164,6 +170,18 @@ Resources:
             RestApiId: !Ref CodeSenseiApi
             Path: /users/me
             Method: DELETE
+        UsersOptionsSelf:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CodeSenseiApi
+            Path: /users/me
+            Method: OPTIONS
+        UsersOptionsPassword:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CodeSenseiApi
+            Path: /users/me/password
+            Method: OPTIONS
 
   SessionsFunction:
     Type: AWS::Serverless::Function
@@ -198,6 +216,12 @@ Resources:
             RestApiId: !Ref CodeSenseiApi
             Path: /sessions
             Method: POST
+        SessionsOptionsRoot:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CodeSenseiApi
+            Path: /sessions
+            Method: OPTIONS
         GetSession:
           Type: Api
           Properties:
@@ -222,6 +246,18 @@ Resources:
             RestApiId: !Ref CodeSenseiApi
             Path: /sessions/{id}
             Method: DELETE
+        SessionsOptionsItem:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CodeSenseiApi
+            Path: /sessions/{id}
+            Method: OPTIONS
+        SessionsOptionsMetadata:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CodeSenseiApi
+            Path: /sessions/{id}/metadata
+            Method: OPTIONS
 
   ThreadsFunction:
     Type: AWS::Serverless::Function
@@ -271,6 +307,18 @@ Resources:
             RestApiId: !Ref CodeSenseiApi
             Path: /threads/{thread_id}
             Method: DELETE
+        SessionsThreadsOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CodeSenseiApi
+            Path: /sessions/{id}/threads
+            Method: OPTIONS
+        ThreadsOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CodeSenseiApi
+            Path: /threads/{thread_id}
+            Method: OPTIONS
   MessagesFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -301,6 +349,12 @@ Resources:
             RestApiId: !Ref CodeSenseiApi
             Path: /threads/{thread_id}/messages
             Method: GET
+        MessagesOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CodeSenseiApi
+            Path: /threads/{thread_id}/messages
+            Method: OPTIONS
   AIFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -313,7 +367,7 @@ Resources:
       Environment:
         Variables:
           AI_RATE_LIMIT_PER_MINUTE: '10'
-          BEDROCK_MODEL_ID: 'anthropic.claude-3-5-sonnet-20241022-v2:0'
+          BEDROCK_MODEL_ID: 'anthropic.claude-3-5-sonnet-20241022-v1:0'
           BEDROCK_REGION: 'us-east-1'
           BEDROCK_MAX_OUTPUT_TOKENS: '4000'
           BEDROCK_TEMPERATURE: '0.7'
@@ -337,6 +391,12 @@ Resources:
             RestApiId: !Ref CodeSenseiApi
             Path: /ai/analyze
             Method: POST
+        AIOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CodeSenseiApi
+            Path: /ai/analyze
+            Method: OPTIONS
   UsersTable:
     Type: AWS::DynamoDB::Table
     Properties:
