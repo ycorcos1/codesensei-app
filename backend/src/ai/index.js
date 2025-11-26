@@ -5,6 +5,7 @@ const {
   InvokeModelCommand,
 } = require("@aws-sdk/client-bedrock-runtime");
 const { TextDecoder } = require("util");
+const JSON5 = require("json5");
 
 const { authRequired } = require("./shared/auth-middleware");
 const { success, error } = require("./shared/response-helpers");
@@ -408,18 +409,15 @@ function parseBedrockResponse(bedrockResponse) {
     if (firstBrace === -1 || lastBrace === -1) {
       throw new Error("NO_JSON_OBJECT");
     }
-    jsonPayload = JSON.parse(responseText.slice(firstBrace, lastBrace + 1));
+    const rawObject = responseText.slice(firstBrace, lastBrace + 1);
+    try {
+      jsonPayload = JSON.parse(rawObject);
+    } catch (err) {
+      jsonPayload = JSON5.parse(rawObject);
+    }
   } catch (err) {
     try {
-      const normalized = responseText
-        .replace(/'([A-Za-z0-9_]+)'\s*:/g, '"$1":') // 'key': -> "key":
-        .replace(/([{,]\s*)"([^"]+)":\s*'([^']*)'/g, '$1"$2":"$3"'); // "key": 'value' -> "key":"value"
-      const firstBrace = normalized.indexOf("{");
-      const lastBrace = normalized.lastIndexOf("}");
-      if (firstBrace === -1 || lastBrace === -1) {
-        throw new Error("NO_JSON_OBJECT");
-      }
-      jsonPayload = JSON.parse(normalized.slice(firstBrace, lastBrace + 1));
+      jsonPayload = JSON5.parse(responseText);
     } catch (secondaryError) {
       console.error(
         "[ai] Failed to parse AI response JSON:",
