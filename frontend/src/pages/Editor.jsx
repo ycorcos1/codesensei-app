@@ -516,39 +516,29 @@ export default function EditorPage() {
   }, [fetchThreads, normalizeThreadEntity, sessionId]);
 
   const handleApplyPatch = useCallback(
-    async (patchOrPatches) => {
+    async (patch) => {
       const editorInstance = editorRef.current;
       const monaco = monacoRef.current;
 
-      // Normalize to array of patches
-      const patches = Array.isArray(patchOrPatches)
-        ? patchOrPatches
-        : [patchOrPatches];
-
-      if (patches.length === 0) {
-        setError("No patches to apply.");
+      // Validate the patch
+      if (!patch || typeof patch.replacement !== "string") {
+        setError("Invalid patch payload received from AI.");
         return;
       }
 
-      // Validate all patches first
-      for (const patch of patches) {
-        if (!patch || typeof patch.replacement !== "string") {
-          setError("Invalid patch payload received from AI.");
-          return;
-        }
-        const startLine = Number(patch.start_line);
-        const endLine = Number(patch.end_line);
-        if (
-          !Number.isInteger(startLine) ||
-          !Number.isInteger(endLine) ||
-          startLine < 1 ||
-          endLine < startLine
-        ) {
-          setError(
-            "Unable to apply AI patch because the provided line numbers are invalid."
-          );
-          return;
-        }
+      const startLine = Number(patch.start_line);
+      const endLine = Number(patch.end_line);
+
+      if (
+        !Number.isInteger(startLine) ||
+        !Number.isInteger(endLine) ||
+        startLine < 1 ||
+        endLine < startLine
+      ) {
+        setError(
+          "Unable to apply AI patch because the provided line numbers are invalid."
+        );
+        return;
       }
 
       if (!editorInstance || !monaco) {
@@ -562,82 +552,52 @@ export default function EditorPage() {
         return;
       }
 
-      // Sort patches by start_line descending to apply from bottom to top
-      // This preserves line numbers for patches above the current one
-      const sortedPatches = [...patches].sort(
-        (a, b) => b.start_line - a.start_line
-      );
+      const lineCount = model.getLineCount();
+      const boundedStart = Math.max(1, Math.min(startLine, lineCount));
+      const boundedEnd = Math.max(boundedStart, Math.min(endLine, lineCount));
+      const endColumn = model.getLineMaxColumn(boundedEnd) || 1;
 
-      // Apply patches one at a time from bottom to top
-      editorInstance.pushUndoStop();
-
-      for (const patch of sortedPatches) {
-        const currentModel = editorInstance.getModel();
-        if (!currentModel) break;
-
-        const lineCount = currentModel.getLineCount();
-        const startLine = Number(patch.start_line);
-        const endLine = Number(patch.end_line);
-        const boundedStart = Math.max(1, Math.min(startLine, lineCount));
-        const boundedEnd = Math.max(boundedStart, Math.min(endLine, lineCount));
-        const endColumn = currentModel.getLineMaxColumn(boundedEnd) || 1;
-
-        let edit;
-        if (startLine > lineCount) {
-          edit = {
-            range: new monaco.Range(
-              lineCount,
-              currentModel.getLineMaxColumn(lineCount),
-              lineCount,
-              currentModel.getLineMaxColumn(lineCount)
-            ),
-            text:
-              (lineCount > 0 && currentModel.getLineContent(lineCount).length > 0
-                ? "\n"
-                : "") + patch.replacement,
-            forceMoveMarkers: true,
-          };
-        } else {
-          edit = {
-            range: new monaco.Range(boundedStart, 1, boundedEnd, endColumn),
-            text: patch.replacement,
-            forceMoveMarkers: true,
-          };
-        }
-
-        editorInstance.executeEdits("codesensei.aiPatch", [edit]);
+      // Build the edit to replace the entire range with the modified code
+      let edit;
+      if (startLine > lineCount) {
+        edit = {
+          range: new monaco.Range(
+            lineCount,
+            model.getLineMaxColumn(lineCount),
+            lineCount,
+            model.getLineMaxColumn(lineCount)
+          ),
+          text:
+            (lineCount > 0 && model.getLineContent(lineCount).length > 0
+              ? "\n"
+              : "") + patch.replacement,
+          forceMoveMarkers: true,
+        };
+      } else {
+        edit = {
+          range: new monaco.Range(boundedStart, 1, boundedEnd, endColumn),
+          text: patch.replacement,
+          forceMoveMarkers: true,
+        };
       }
 
+      editorInstance.pushUndoStop();
+      editorInstance.executeEdits("codesensei.aiPatch", [edit]);
       editorInstance.pushUndoStop();
 
       const updatedCode = model.getValue();
       setCode(updatedCode);
       setIsDirty(true);
 
-      // Calculate the new range based on all patches
-      const firstPatch = patches.reduce(
-        (min, p) => (p.start_line < min.start_line ? p : min),
-        patches[0]
-      );
-      const lastPatch = patches.reduce(
-        (max, p) => (p.end_line > max.end_line ? p : max),
-        patches[0]
-      );
-
-      const boundedStart = Math.max(1, firstPatch.start_line);
-
-      // Calculate how many lines were added/removed
-      let totalOriginalLines = 0;
-      let totalNewLines = 0;
-      for (const patch of patches) {
-        totalOriginalLines += patch.end_line - patch.start_line + 1;
-        totalNewLines +=
-          patch.replacement.length === 0
-            ? 0
-            : patch.replacement.split("\n").length;
-      }
-      const lineDelta = totalNewLines - totalOriginalLines;
-      const newEndLine = Math.max(boundedStart, lastPatch.end_line + lineDelta);
+      // Calculate the new end line based on the replacement
+      const replacementLineCount =
+        patch.replacement.length === 0
+          ? 0
+          : patch.replacement.split("\n").length;
+      const newEndLine =
+        replacementLineCount > 0
+          ? boundedStart + replacementLineCount - 1
+          : boundedStart;
 
       // Get the new selected text from the updated code
       const updatedLines = updatedCode.split("\n");

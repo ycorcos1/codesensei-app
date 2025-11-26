@@ -582,22 +582,28 @@ export default function ThreadPanel({
 
   const handleApplyPatchFromDiff = useCallback(async () => {
     if (
-      !diffState?.changes ||
-      diffState.changes.length === 0 ||
+      !diffState?.modifiedCode ||
+      !diffState?.startLine ||
+      !diffState?.endLine ||
       !onApplyPatch ||
       !threadId
     ) {
       return;
     }
 
-    const { changes, messageId } = diffState;
+    const { modifiedCode, startLine, endLine, messageId } = diffState;
 
     try {
       setApplyingPatch(true);
       setError("");
 
-      // Pass all changes at once - Editor.jsx will handle applying them in the correct order
-      await onApplyPatch(changes);
+      // Pass a single patch that replaces the entire original range with the complete modified code
+      // This avoids issues with applying multiple patches with shifting line numbers
+      await onApplyPatch({
+        start_line: startLine,
+        end_line: endLine,
+        replacement: modifiedCode,
+      });
 
       setAppliedMessageIds((prev) => {
         const next = new Set(prev);
@@ -858,7 +864,7 @@ export default function ThreadPanel({
         endLine={diffState?.endLine}
         isApplying={applyingPatch}
         canApply={
-          Boolean(diffState?.changes?.length && onApplyPatch) &&
+          Boolean(diffState?.modifiedCode && diffState?.startLine && diffState?.endLine && onApplyPatch) &&
           !appliedMessageIds.has(diffState?.messageId || "")
         }
       />
