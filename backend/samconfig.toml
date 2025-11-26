@@ -2,7 +2,7 @@ version = 0.1
 
 [default]
 [default.global.parameters]
-stack_name = "codesensei-backend-prod"
+stack_name = "CodeSensei-backend"
 
 [default.build.parameters]
 cached = true
@@ -21,14 +21,14 @@ lint = true
 [default.sync.parameters]
 watch = true
 
-[prod]
-[prod.global.parameters]
-stack_name = "codesensei-backend-prod"
+[dev]
+[dev.global.parameters]
+stack_name = "codesensei-backend-dev"
 
-[prod.deploy.parameters]
+[dev.deploy.parameters]
 capabilities = "CAPABILITY_IAM"
 confirm_changeset = true
 resolve_s3 = true
 region = "us-east-1"
-parameter_overrides = "Environment=prod"
+parameter_overrides = "Environment=dev CorsAllowedOrigin=https://main.dnq80x6al42k7.amplifyapp.com"
 
