@@ -194,6 +194,7 @@ async function handleCreateMessage(event) {
   let content;
   let contextMode;
   let tokenCount;
+  let metadata;
 
   try {
     role = sanitizeRole(payload.role);
@@ -205,6 +206,75 @@ async function handleCreateMessage(event) {
 
     if (payload.token_count !== undefined) {
       tokenCount = sanitizeTokenCount(payload.token_count);
+    }
+
+    if (role === 'ai' && payload.metadata !== undefined) {
+      if (payload.metadata === null || typeof payload.metadata !== 'object' || Array.isArray(payload.metadata)) {
+        throw new Error('INVALID_METADATA');
+      }
+
+      metadata = {};
+
+      if (payload.metadata.analysis !== undefined) {
+        if (typeof payload.metadata.analysis !== 'string') {
+          throw new Error('INVALID_METADATA_ANALYSIS');
+        }
+        metadata.analysis = payload.metadata.analysis;
+      }
+
+      if (payload.metadata.changes !== undefined) {
+        if (!Array.isArray(payload.metadata.changes)) {
+          throw new Error('INVALID_METADATA_CHANGES');
+        }
+
+        metadata.changes = payload.metadata.changes.map((change) => {
+          if (
+            !change ||
+            typeof change !== 'object' ||
+            !Number.isInteger(change.start_line) ||
+            !Number.isInteger(change.end_line) ||
+            change.start_line < 1 ||
+            change.end_line < change.start_line ||
+            typeof change.replacement !== 'string'
+          ) {
+            throw new Error('INVALID_METADATA_CHANGE');
+          }
+
+          return {
+            start_line: change.start_line,
+            end_line: change.end_line,
+            replacement: change.replacement,
+          };
+        });
+      }
+
+      if (payload.metadata.context_mode !== undefined) {
+        metadata.context_mode = sanitizeContextMode(payload.metadata.context_mode);
+        if (contextMode === undefined) {
+          contextMode = metadata.context_mode;
+        }
+      }
+
+      if (payload.metadata.token_count !== undefined) {
+        metadata.token_count = sanitizeTokenCount(payload.metadata.token_count);
+        if (tokenCount === undefined) {
+          tokenCount = metadata.token_count;
+        }
+      }
+
+      if (payload.metadata.patch_applied !== undefined) {
+        if (typeof payload.metadata.patch_applied !== 'boolean') {
+          throw new Error('INVALID_METADATA_PATCH_APPLIED');
+        }
+        metadata.patch_applied = payload.metadata.patch_applied;
+      }
+
+      if (payload.metadata.applied_from_message_id !== undefined) {
+        if (typeof payload.metadata.applied_from_message_id !== 'string') {
+          throw new Error('INVALID_METADATA_APPLIED_FROM');
+        }
+        metadata.applied_from_message_id = payload.metadata.applied_from_message_id;
+      }
     }
   } catch (err) {
     switch (err.message) {
@@ -250,6 +320,48 @@ async function handleCreateMessage(event) {
           'INVALID_INPUT',
           'token_count must be a non-negative integer.',
           'token_count',
+        );
+      case 'INVALID_METADATA':
+        return error(
+          400,
+          'INVALID_INPUT',
+          'metadata must be an object.',
+          'metadata',
+        );
+      case 'INVALID_METADATA_ANALYSIS':
+        return error(
+          400,
+          'INVALID_INPUT',
+          'metadata.analysis must be a string.',
+          'metadata.analysis',
+        );
+      case 'INVALID_METADATA_CHANGES':
+        return error(
+          400,
+          'INVALID_INPUT',
+          'metadata.changes must be an array.',
+          'metadata.changes',
+        );
+      case 'INVALID_METADATA_CHANGE':
+        return error(
+          400,
+          'INVALID_INPUT',
+          'Each metadata.changes item must include start_line, end_line, and replacement.',
+          'metadata.changes',
+        );
+      case 'INVALID_METADATA_PATCH_APPLIED':
+        return error(
+          400,
+          'INVALID_INPUT',
+          'metadata.patch_applied must be a boolean.',
+          'metadata.patch_applied',
+        );
+      case 'INVALID_METADATA_APPLIED_FROM':
+        return error(
+          400,
+          'INVALID_INPUT',
+          'metadata.applied_from_message_id must be a string.',
+          'metadata.applied_from_message_id',
         );
       default:
         throw err;
@@ -323,6 +435,10 @@ async function handleCreateMessage(event) {
         item.token_count = tokenCount;
       }
 
+      if (metadata && Object.keys(metadata).length > 0) {
+        item.metadata = metadata;
+      }
+
       try {
         await documentClient.send(
           new PutCommand({
@@ -347,6 +463,10 @@ async function handleCreateMessage(event) {
 
         if (item.token_count !== undefined) {
           responseMessage.token_count = item.token_count;
+        }
+
+        if (item.metadata !== undefined) {
+          responseMessage.metadata = item.metadata;
         }
 
         return success(201, { message: responseMessage });
@@ -461,6 +581,10 @@ async function handleListMessages(event) {
 
       if (item.token_count !== undefined) {
         message.token_count = item.token_count;
+      }
+
+      if (item.metadata !== undefined) {
+        message.metadata = item.metadata;
       }
 
       return message;

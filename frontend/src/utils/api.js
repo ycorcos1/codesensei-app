@@ -117,6 +117,12 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
+  updateThreadAnchor: (threadId, payload) =>
+    request(`/threads/${threadId}/anchor`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+
   getThread: (threadId) =>
     request(`/threads/${threadId}`, {
       method: "GET",

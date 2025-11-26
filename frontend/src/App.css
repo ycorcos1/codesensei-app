@@ -1607,6 +1607,40 @@ a:hover {
   font-size: 11px;
 }
 
+.message-confirmation.message-ai .message-content {
+  background-color: rgba(34, 197, 94, 0.15);
+  color: #d1fae5;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.message-confirmation .confirmation-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-right: 8px;
+  background-color: #22c55e;
+  color: #0b1f13;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.message-applied-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background-color: rgba(34, 197, 94, 0.2);
+  color: #22c55e;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .message-actions {
   display: flex;
   gap: 8px;
@@ -1615,6 +1649,13 @@ a:hover {
 
 .message-actions .btn {
   min-width: unset;
+}
+
+.btn-disabled {
+  background-color: rgba(107, 114, 128, 0.4);
+  color: rgba(229, 231, 235, 0.6);
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 .thread-panel-input-area {

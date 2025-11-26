@@ -168,15 +168,19 @@ function extractLocalContext(code, selection) {
 function buildSystemPrompt(language, contextMode) {
   const base = [
     `You are an expert ${language} code reviewer.`,
-    "Provide precise analysis, actionable improvements, and code fixes when appropriate.",
-    "Always respond with VALID JSON only, matching exactly this schema:",
+    "Analyze the provided code and deliver concise, actionable feedback.",
+    "Respond with ONLY a valid JSON object and nothing else.",
     "{",
-    '  "explanation": "markdown string with your analysis",',
-    '  "suggested_code": "string with improved code or null",',
-    '  "patch": { "start_line": number, "end_line": number, "replacement": "string" } or null,',
-    '  "confidence": "high" | "medium" | "low"',
+    '  "analysis": "plain text explanation with no markdown or code fences",',
+    '  "changes": [',
+    '    { "start_line": number, "end_line": number, "replacement": "string" }',
+    "  ]",
     "}",
-    "Never include prose outside of the JSON object.",
+    "Guidelines:",
+    "- analysis must be human-readable plain text (no markdown, bullet lists, or code fences).",
+    `- replacement must contain only valid ${language} source code with no surrounding fences, language tags, or narrative commentary.`,
+    "- If no code changes are needed, return an empty changes array [].",
+    "- Line numbers in changes must reference the original file, not the snippet.",
   ];
 
   if (contextMode === "local") {
@@ -320,6 +324,59 @@ function extractResponseText(bedrockResponse) {
   return textSegment.text;
 }
 
+function sanitizeAnalysisText(text) {
+  if (typeof text !== "string") {
+    return "";
+  }
+
+  let cleaned = text.trim();
+
+  // Remove markdown headers
+  cleaned = cleaned.replace(/^#{1,6}\s+/gm, "");
+
+  // Remove bold/italic markers but keep content
+  cleaned = cleaned.replace(/\*\*([^*]+)\*\*/g, "$1");
+  cleaned = cleaned.replace(/\*([^*]+)\*/g, "$1");
+  cleaned = cleaned.replace(/__([^_]+)__/g, "$1");
+  cleaned = cleaned.replace(/_([^_]+)_/g, "$1");
+
+  // Remove inline code backticks but keep text
+  cleaned = cleaned.replace(/`([^`]+)`/g, "$1");
+
+  // Replace bullet markers with simple bullets
+  cleaned = cleaned.replace(/^[\s]*[-*+]\s+/gm, "• ");
+
+  // Remove numbered list formatting
+  cleaned = cleaned.replace(/^[\s]*\d+\.\s+/gm, "");
+
+  // Collapse excessive newlines
+  cleaned = cleaned.replace(/\n{3,}/g, "\n\n");
+
+  return cleaned.trim();
+}
+
+function sanitizeReplacementCode(code) {
+  if (typeof code !== "string") {
+    return "";
+  }
+
+  let cleaned = code;
+
+  // Strip leading markdown fences with optional language tag
+  cleaned = cleaned.replace(/^```[a-zA-Z0-9_-]*\s*\r?\n/, "");
+
+  // Strip trailing markdown fence
+  cleaned = cleaned.replace(/\r?\n```$/, "");
+
+  // Remove narrative prefixes such as "Here is the code:"
+  cleaned = cleaned.replace(
+    /^(Here'?s?\s+(the\s+)?(improved|updated|corrected)?\s*code:?)(\s*\n)+/i,
+    ""
+  );
+
+  return cleaned;
+}
+
 function parseBedrockResponse(bedrockResponse) {
   const responseText = extractResponseText(bedrockResponse);
 
@@ -340,45 +397,41 @@ function parseBedrockResponse(bedrockResponse) {
     throw new Error("AI_MALFORMED_RESPONSE");
   }
 
-  const explanation =
-    typeof jsonPayload.explanation === "string" &&
-    jsonPayload.explanation.trim()
-      ? jsonPayload.explanation
-      : responseText;
-
-  const suggestedCode =
-    jsonPayload.suggested_code === null ||
-    typeof jsonPayload.suggested_code === "string"
-      ? jsonPayload.suggested_code
-      : null;
-
-  let patch = null;
   if (
-    jsonPayload.patch &&
-    typeof jsonPayload.patch === "object" &&
-    Number.isInteger(jsonPayload.patch.start_line) &&
-    Number.isInteger(jsonPayload.patch.end_line) &&
-    typeof jsonPayload.patch.replacement === "string"
+    typeof jsonPayload.analysis !== "string" ||
+    !jsonPayload.analysis.trim()
   ) {
-    patch = {
-      start_line: jsonPayload.patch.start_line,
-      end_line: jsonPayload.patch.end_line,
-      replacement: jsonPayload.patch.replacement,
-    };
+    throw new Error("AI_MALFORMED_RESPONSE");
   }
 
-  const confidence =
-    jsonPayload.confidence === "high" ||
-    jsonPayload.confidence === "medium" ||
-    jsonPayload.confidence === "low"
-      ? jsonPayload.confidence
-      : "medium";
+  if (!Array.isArray(jsonPayload.changes)) {
+    throw new Error("AI_MALFORMED_RESPONSE");
+  }
+
+  const analysis = sanitizeAnalysisText(jsonPayload.analysis);
+  const changes = jsonPayload.changes.map((change) => {
+    if (
+      !change ||
+      typeof change !== "object" ||
+      !Number.isInteger(change.start_line) ||
+      !Number.isInteger(change.end_line) ||
+      change.start_line < 1 ||
+      change.end_line < change.start_line ||
+      typeof change.replacement !== "string"
+    ) {
+      throw new Error("AI_MALFORMED_RESPONSE");
+    }
+
+    return {
+      start_line: change.start_line,
+      end_line: change.end_line,
+      replacement: sanitizeReplacementCode(change.replacement),
+    };
+  });
 
   return {
-    explanation,
-    suggested_code: suggestedCode,
-    patch,
-    confidence,
+    analysis,
+    changes,
   };
 }
 
@@ -429,52 +482,38 @@ async function callBedrock({ code, prompt, language, selection, history }) {
   );
   const parsed = parseBedrockResponse(bedrockResponse);
 
-  let patch = parsed.patch;
-  if (
-    !patch &&
-    selection &&
-    Number.isInteger(selection.start_line) &&
-    Number.isInteger(selection.end_line) &&
-    typeof parsed.suggested_code === "string" &&
-    parsed.suggested_code.trim().length > 0
-  ) {
-    patch = {
-      start_line: selection.start_line,
-      end_line: selection.end_line,
-      replacement: parsed.suggested_code.trim(),
-    };
-  }
+  const translatedChanges =
+    contextMode === "local"
+      ? parsed.changes.map((change) => {
+          const snippetLineCount = effectiveCode.split("\n").length;
+          const appearsRelative =
+            change.start_line >= 1 &&
+            change.end_line >= change.start_line &&
+            change.end_line <= snippetLineCount &&
+            actualStartLine > 1;
 
-  if (contextMode === "local" && patch) {
-    const snippetLineCount = effectiveCode.split("\n").length;
-    const appearsRelative =
-      patch.start_line >= 1 &&
-      patch.end_line >= patch.start_line &&
-      patch.end_line <= snippetLineCount &&
-      actualStartLine > 1;
+          if (appearsRelative) {
+            return {
+              ...change,
+              start_line: change.start_line + actualStartLine - 1,
+              end_line: change.end_line + actualStartLine - 1,
+            };
+          }
 
-    if (appearsRelative) {
-      patch = {
-        ...patch,
-        start_line: patch.start_line + actualStartLine - 1,
-        end_line: patch.end_line + actualStartLine - 1,
-      };
-    }
-  }
+          return change;
+        })
+      : parsed.changes;
 
-  const explanationLength = parsed.explanation?.length || 0;
-  const suggestedLength = parsed.suggested_code?.length || 0;
-  const replacementLength =
-    typeof patch?.replacement === "string" ? patch.replacement.length : 0;
-  const outputTokens = Math.ceil(
-    (explanationLength + suggestedLength + replacementLength) / 4
+  const analysisLength = parsed.analysis.length || 0;
+  const replacementLength = translatedChanges.reduce(
+    (total, change) => total + (change.replacement?.length || 0),
+    0
   );
+  const outputTokens = Math.ceil((analysisLength + replacementLength) / 4);
 
   return {
-    explanation: parsed.explanation,
-    suggested_code: parsed.suggested_code,
-    patch,
-    confidence: parsed.confidence,
+    analysis: parsed.analysis,
+    changes: translatedChanges,
     context_mode: contextMode,
     token_count: inputTokens + outputTokens,
   };

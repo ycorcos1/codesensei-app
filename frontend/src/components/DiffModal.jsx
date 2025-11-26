@@ -16,12 +16,12 @@ export default function DiffModal({
 }) {
   const handleKeyDown = useCallback(
     (event) => {
-      if (event.key === "Escape") {
+      if (event.key === "Escape" && isOpen) {
         event.preventDefault();
         onClose();
       }
     },
-    [onClose]
+    [onClose, isOpen]
   );
 
   useEffect(() => {
@@ -39,22 +39,24 @@ export default function DiffModal({
     }
   };
 
-  if (!isOpen) {
-    return null;
-  }
-
   const headingSuffix =
     typeof startLine === "number" && typeof endLine === "number"
       ? ` (Lines ${startLine}\u2013${endLine})`
       : "";
+
+  const overlayStyle = {
+    display: isOpen ? "flex" : "none",
+  };
 
   return (
     <div
       className="diff-modal-overlay"
       role="dialog"
       aria-modal="true"
+      aria-hidden={!isOpen}
       aria-label="Review code changes"
       onClick={handleOverlayClick}
+      style={overlayStyle}
     >
       <div className="diff-modal-card">
         <header className="diff-modal-header">
@@ -64,25 +66,28 @@ export default function DiffModal({
             className="diff-modal-close"
             onClick={onClose}
             aria-label="Close diff modal"
+            tabIndex={isOpen ? 0 : -1}
           >
             ×
           </button>
         </header>
         <div className="diff-modal-body">
-          <DiffEditor
-            original={originalCode}
-            modified={modifiedCode}
-            language={language}
-            theme="vs-dark"
-            options={{
-              renderSideBySide: true,
-              readOnly: true,
-              automaticLayout: true,
-              wordWrap: "on",
-              minimap: { enabled: false },
-            }}
-            height="100%"
-          />
+          {originalCode || modifiedCode ? (
+            <DiffEditor
+              original={originalCode}
+              modified={modifiedCode}
+              language={language}
+              theme="vs-dark"
+              options={{
+                renderSideBySide: true,
+                readOnly: true,
+                automaticLayout: true,
+                wordWrap: "on",
+                minimap: { enabled: false },
+              }}
+              height="100%"
+            />
+          ) : null}
         </div>
         <footer className="diff-modal-footer">
           <button
@@ -90,6 +95,7 @@ export default function DiffModal({
             className="btn btn-secondary btn-small"
             onClick={onClose}
             disabled={isApplying}
+            tabIndex={isOpen ? 0 : -1}
           >
             Cancel
           </button>
@@ -99,6 +105,7 @@ export default function DiffModal({
               className="btn btn-primary btn-small"
               onClick={onApply}
               disabled={isApplying}
+              tabIndex={isOpen ? 0 : -1}
             >
               {isApplying ? "Applying..." : "Apply Patch"}
             </button>
@@ -129,4 +136,3 @@ DiffModal.defaultProps = {
   isApplying: false,
   canApply: true,
 };
-

@@ -104,6 +104,7 @@ export default function ThreadPanel({
   const [sending, setSending] = useState(false);
   const [messageExtras, setMessageExtras] = useState({});
   const [diffState, setDiffState] = useState(null);
+  const [appliedMessageIds, setAppliedMessageIds] = useState(() => new Set());
   const [applyingPatch, setApplyingPatch] = useState(false);
 
   const messagesEndRef = useRef(null);
@@ -144,6 +145,38 @@ export default function ThreadPanel({
         }
         const threadMessages = normalizeMessagesResponse(response);
         setMessages(threadMessages);
+
+        const restoredExtras = {};
+        const restoredApplied = new Set();
+
+        threadMessages.forEach((message) => {
+          if (message.role !== "ai" || !message.metadata) {
+            return;
+          }
+
+          const changes = Array.isArray(message.metadata.changes)
+            ? message.metadata.changes
+            : [];
+          const contextMode =
+            typeof message.metadata.context_mode === "string"
+              ? message.metadata.context_mode
+              : null;
+
+          restoredExtras[message.message_id] = {
+            changes,
+            context_mode: contextMode,
+          };
+
+          if (
+            message.metadata.patch_applied === true &&
+            typeof message.metadata.applied_from_message_id === "string"
+          ) {
+            restoredApplied.add(message.metadata.applied_from_message_id);
+          }
+        });
+
+        setMessageExtras(restoredExtras);
+        setAppliedMessageIds(restoredApplied);
       } catch (err) {
         if (!isSubscribed) {
           return;
@@ -171,6 +204,7 @@ export default function ThreadPanel({
     setError("");
     setLoading(true);
     setMessageExtras({});
+    setAppliedMessageIds(new Set());
     setDiffState(null);
     fetchMessages();
 
@@ -283,53 +317,60 @@ export default function ThreadPanel({
         history: historyPayload,
       });
 
-      const aiExtras = {
-        context_mode:
-          typeof aiResponse?.context_mode === "string"
-            ? aiResponse.context_mode
-            : null,
-        confidence:
-          typeof aiResponse?.confidence === "string"
-            ? aiResponse.confidence
-            : null,
+      const analysis =
+        typeof aiResponse?.analysis === "string" ? aiResponse.analysis : "";
+      const rawChanges = Array.isArray(aiResponse?.changes)
+        ? aiResponse.changes
+        : [];
+      const cleanedChanges = rawChanges
+        .filter(
+          (change) =>
+            change &&
+            typeof change === "object" &&
+            Number.isInteger(change.start_line) &&
+            Number.isInteger(change.end_line) &&
+            change.start_line >= 1 &&
+            change.end_line >= change.start_line &&
+            typeof change.replacement === "string"
+        )
+        .map((change) => ({
+          start_line: change.start_line,
+          end_line: change.end_line,
+          replacement: change.replacement,
+        }));
+
+      const contextMode =
+        typeof aiResponse?.context_mode === "string"
+          ? aiResponse.context_mode
+          : null;
+      const tokenCount =
+        typeof aiResponse?.token_count === "number"
+          ? aiResponse.token_count
+          : null;
+
+      const metadata = {
+        analysis,
+        changes: cleanedChanges,
       };
 
-      if (
-        typeof aiResponse?.suggested_code === "string" &&
-        aiResponse.suggested_code.trim()
-      ) {
-        aiExtras.suggested_code = aiResponse.suggested_code;
+      if (contextMode) {
+        metadata.context_mode = contextMode;
       }
-
-      if (
-        aiResponse?.patch &&
-        typeof aiResponse.patch === "object" &&
-        Number.isInteger(aiResponse.patch.start_line) &&
-        Number.isInteger(aiResponse.patch.end_line) &&
-        typeof aiResponse.patch.replacement === "string"
-      ) {
-        aiExtras.patch = {
-          start_line: aiResponse.patch.start_line,
-          end_line: aiResponse.patch.end_line,
-          replacement: aiResponse.patch.replacement,
-        };
-      }
-
-      if (selectionPayload) {
-        aiExtras.selection = selectionPayload;
+      if (tokenCount !== null) {
+        metadata.token_count = tokenCount;
       }
 
       const aiMessagePayload = {
         role: "ai",
-        content: aiResponse?.explanation || "",
+        content: analysis,
+        metadata,
       };
 
-      if (aiResponse?.context_mode) {
-        aiMessagePayload.context_mode = aiResponse.context_mode;
+      if (contextMode) {
+        aiMessagePayload.context_mode = contextMode;
       }
-
-      if (typeof aiResponse?.token_count === "number") {
-        aiMessagePayload.token_count = aiResponse.token_count;
+      if (tokenCount !== null) {
+        aiMessagePayload.token_count = tokenCount;
       }
 
       const aiMessageResponse = await api.createMessage(
@@ -350,7 +391,10 @@ export default function ThreadPanel({
         if (thinkingMessage?.message_id) {
           delete next[thinkingMessage.message_id];
         }
-        next[aiMessage.message_id] = aiExtras;
+        next[aiMessage.message_id] = {
+          changes: cleanedChanges,
+          context_mode: contextMode,
+        };
         return next;
       });
     } catch (err) {
@@ -414,14 +458,12 @@ export default function ThreadPanel({
     [handleSendMessage]
   );
 
-  const handleCopySuggestedCode = useCallback(
+  const handleCopyCode = useCallback(
     async (messageId) => {
       const extras = messageExtras[messageId];
-      const codeToCopy =
-        (extras?.suggested_code && extras.suggested_code.trim()) ||
-        (extras?.patch?.replacement && extras.patch.replacement);
+      const replacement = extras?.changes?.[0]?.replacement;
 
-      if (!codeToCopy) {
+      if (!replacement) {
         setError("No suggested code available to copy.");
         return;
       }
@@ -434,7 +476,7 @@ export default function ThreadPanel({
         ) {
           throw new Error("Clipboard API is not available");
         }
-        await navigator.clipboard.writeText(codeToCopy);
+        await navigator.clipboard.writeText(replacement);
       } catch {
         setError("Unable to copy to clipboard. Please copy manually.");
       }
@@ -444,60 +486,42 @@ export default function ThreadPanel({
 
   const handleViewDiff = useCallback(
     (messageId) => {
+      if (appliedMessageIds.has(messageId)) {
+        return;
+      }
+
       const extras = messageExtras[messageId];
-      if (!extras) {
+      const change = extras?.changes?.[0];
+      if (!change) {
         return;
       }
 
-      const monacoLanguage = toMonacoLanguage(sessionLanguage);
-      const patch = extras.patch || null;
-      const suggested = extras.suggested_code || "";
-      let originalSnippet = "";
-      let modifiedSnippet = "";
-      let startLine;
-      let endLine;
-
-      if (patch) {
-        const { start_line: start, end_line: end, replacement } = patch;
-        const lines = (sessionCode || "").split("\n");
-        const safeStart = Math.max(1, Number(start) || 1);
-        const safeEnd = Math.max(safeStart, Number(end) || safeStart);
-        const sliceEnd = Math.min(safeEnd, lines.length);
-        originalSnippet =
-          sliceEnd >= safeStart
-            ? lines.slice(safeStart - 1, sliceEnd).join("\n")
-            : "";
-        modifiedSnippet = replacement;
-        startLine = safeStart;
-        endLine = safeEnd;
-      } else if (suggested) {
-        const selectionText =
-          typeof thread?.selected_text === "string" && thread.selected_text
-            ? thread.selected_text
-            : "";
-        originalSnippet = selectionText || sessionCode || "";
-        modifiedSnippet = suggested;
-        if (typeof thread?.start_line === "number") {
-          startLine = thread.start_line;
-        }
-        if (typeof thread?.end_line === "number") {
-          endLine = thread.end_line;
-        }
-      } else {
+      const start = Number(change.start_line);
+      const end = Number(change.end_line);
+      if (!Number.isInteger(start) || !Number.isInteger(end)) {
         return;
       }
+
+      const lines = (sessionCode || "").split("\n");
+      const safeStart = Math.max(1, start);
+      const safeEnd = Math.max(safeStart, end);
+      const sliceEnd = Math.min(safeEnd, lines.length);
+      const originalSnippet =
+        sliceEnd >= safeStart
+          ? lines.slice(safeStart - 1, sliceEnd).join("\n")
+          : "";
 
       setDiffState({
         messageId,
         originalCode: originalSnippet,
-        modifiedCode: modifiedSnippet,
-        language: monacoLanguage,
-        startLine,
-        endLine,
-        extras,
+        modifiedCode: change.replacement,
+        language: toMonacoLanguage(sessionLanguage),
+        startLine: safeStart,
+        endLine: safeEnd,
+        change,
       });
     },
-    [messageExtras, sessionLanguage, sessionCode, thread]
+    [appliedMessageIds, messageExtras, sessionLanguage, sessionCode]
   );
 
   const handleCloseDiff = useCallback(() => {
@@ -505,15 +529,67 @@ export default function ThreadPanel({
   }, []);
 
   const handleApplyPatchFromDiff = useCallback(async () => {
-    if (!diffState?.extras?.patch || !onApplyPatch) {
+    if (!diffState?.change || !onApplyPatch || !threadId) {
       return;
     }
+
+    const { change, messageId } = diffState;
 
     try {
       setApplyingPatch(true);
       setError("");
-      await onApplyPatch(diffState.extras.patch);
+
+      await onApplyPatch({
+        start_line: change.start_line,
+        end_line: change.end_line,
+        replacement: change.replacement,
+      });
+
+      setAppliedMessageIds((prev) => {
+        const next = new Set(prev);
+        next.add(messageId);
+        return next;
+      });
+
       setDiffState(null);
+
+      const confirmationPayload = {
+        role: "ai",
+        content:
+          "Patch applied successfully. The code has been updated. Feel free to ask for more suggestions if needed.",
+        metadata: {
+          patch_applied: true,
+          applied_from_message_id: messageId,
+          changes: [],
+        },
+      };
+
+      try {
+        const confirmationResponse = await api.createMessage(
+          threadId,
+          confirmationPayload
+        );
+        const confirmationMessage =
+          confirmationResponse?.message || confirmationResponse;
+
+        setMessages((prev) => [...prev, confirmationMessage]);
+        setMessageExtras((prev) => ({
+          ...prev,
+          [confirmationMessage.message_id]: {
+            changes: [],
+            context_mode: null,
+          },
+        }));
+      } catch (confirmErr) {
+        if (confirmErr instanceof APIError && confirmErr.statusCode === 401) {
+          await handleAuthFailure();
+          return;
+        }
+        console.error(
+          "[thread-panel] Failed to create confirmation message:",
+          confirmErr
+        );
+      }
     } catch (applyError) {
       const message =
         applyError instanceof APIError
@@ -523,7 +599,7 @@ export default function ThreadPanel({
     } finally {
       setApplyingPatch(false);
     }
-  }, [diffState, onApplyPatch]);
+  }, [diffState, onApplyPatch, threadId, handleAuthFailure]);
 
   if (!thread) {
     return null;
@@ -588,21 +664,27 @@ export default function ThreadPanel({
         ) : (
           <ul className="message-list">
             {messages.map((message) => {
-              const extras = messageExtras[message.message_id];
-              const hasDiff =
+              const extras = messageExtras[message.message_id] || {};
+              const changeCount = Array.isArray(extras.changes)
+                ? extras.changes.length
+                : 0;
+              const hasDiff = message.role === "ai" && changeCount > 0;
+              const isApplied =
                 message.role === "ai" &&
-                Boolean(extras?.patch || extras?.suggested_code);
-              const canCopy =
+                appliedMessageIds.has(message.message_id);
+              const isConfirmation =
                 message.role === "ai" &&
-                Boolean(
-                  (extras?.suggested_code && extras.suggested_code.trim()) ||
-                    extras?.patch?.replacement
-                );
+                (message.metadata?.patch_applied === true ||
+                  message.metadata?.applied_from_message_id);
+              const contextMode =
+                message.context_mode || extras.context_mode || null;
 
               return (
                 <li
                   key={message.message_id}
-                  className={`message-item message-${message.role}`}
+                  className={`message-item message-${message.role}${
+                    isConfirmation ? " message-confirmation" : ""
+                  }`}
                 >
                   {message._thinking ? (
                     <div className="message-content message-thinking">
@@ -610,32 +692,50 @@ export default function ThreadPanel({
                       <span>AI is thinking...</span>
                     </div>
                   ) : (
-                    <div className="message-content">{message.content}</div>
+                    <div className="message-content">
+                      {isConfirmation ? (
+                        <span className="confirmation-icon" aria-hidden="true">
+                          ✓
+                        </span>
+                      ) : null}
+                      {message.content}
+                    </div>
                   )}
                   <div className="message-timestamp">
                     {message._thinking
                       ? "Analyzing..."
                       : formatRelativeTime(message.timestamp)}
-                    {message.context_mode === "local" ? (
+                    {contextMode === "local" ? (
                       <span className="message-context-badge">
                         Used local context
                       </span>
+                    ) : null}
+                    {isApplied ? (
+                      <span className="message-applied-badge">Patch applied</span>
                     ) : null}
                   </div>
                   {hasDiff ? (
                     <div className="message-actions">
                       <button
                         type="button"
-                        className="btn btn-primary btn-small"
+                        className={`btn btn-small ${
+                          isApplied ? "btn-disabled" : "btn-primary"
+                        }`}
                         onClick={() => handleViewDiff(message.message_id)}
+                        disabled={isApplied}
+                        title={
+                          isApplied
+                            ? "This patch has already been applied"
+                            : "View suggested changes"
+                        }
                       >
-                        View Diff
+                        {isApplied ? "Applied" : "View Diff"}
                       </button>
-                      {canCopy ? (
+                      {!isApplied ? (
                         <button
                           type="button"
                           className="btn btn-secondary btn-small"
-                          onClick={() => handleCopySuggestedCode(message.message_id)}
+                          onClick={() => handleCopyCode(message.message_id)}
                         >
                           Copy Code
                         </button>
@@ -692,7 +792,10 @@ export default function ThreadPanel({
         startLine={diffState?.startLine}
         endLine={diffState?.endLine}
         isApplying={applyingPatch}
-        canApply={Boolean(diffState?.extras?.patch && onApplyPatch)}
+        canApply={
+          Boolean(diffState?.change && onApplyPatch) &&
+          !appliedMessageIds.has(diffState?.messageId || "")
+        }
       />
     </aside>
   );

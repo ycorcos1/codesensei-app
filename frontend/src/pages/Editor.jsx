@@ -589,6 +589,15 @@ export default function EditorPage() {
       setCode(updatedCode);
       setIsDirty(true);
 
+      const replacementLineCount =
+        patch.replacement.length === 0
+          ? 0
+          : patch.replacement.split("\n").length;
+      const newEndLine =
+        replacementLineCount > 0
+          ? boundedStart + replacementLineCount - 1
+          : boundedStart;
+
       if (!sessionId || !session) {
         setError(
           "Session context is unavailable. Reload the page and try again."
@@ -622,6 +631,46 @@ export default function EditorPage() {
         }));
         setLastSavedContent(updatedCode);
         setIsDirty(false);
+        if (selectedThreadId) {
+          try {
+            const anchorResponse = await api.updateThreadAnchor(
+              selectedThreadId,
+              {
+                start_line: boundedStart,
+                end_line: newEndLine,
+                selected_text: patch.replacement,
+              }
+            );
+            const updatedThread =
+              anchorResponse?.thread || anchorResponse || {};
+
+            setThreads((prev) =>
+              prev.map((threadItem) =>
+                threadItem.thread_id === selectedThreadId
+                  ? {
+                      ...threadItem,
+                      ...updatedThread,
+                      start_line: updatedThread.start_line ?? boundedStart,
+                      end_line: updatedThread.end_line ?? newEndLine,
+                      selected_text:
+                        updatedThread.selected_text ?? patch.replacement,
+                    }
+                  : threadItem
+              )
+            );
+          } catch (anchorErr) {
+            if (anchorErr instanceof APIError && anchorErr.statusCode === 401) {
+              await logout();
+              navigate("/login", { replace: true });
+              return;
+            }
+
+            console.error(
+              "[editor] Failed to update thread anchor:",
+              anchorErr
+            );
+          }
+        }
         setToast({ type: "success", message: "Patch applied and saved" });
       } catch (err) {
         if (err instanceof APIError && err.statusCode === 401) {
@@ -645,7 +694,14 @@ export default function EditorPage() {
         setSaving(false);
       }
     },
-    [sessionId, session, normalizeSessionResponse, logout, navigate]
+    [
+      sessionId,
+      session,
+      normalizeSessionResponse,
+      logout,
+      navigate,
+      selectedThreadId,
+    ]
   );
 
   const handleEditorDidMount = useCallback(
