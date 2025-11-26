@@ -1,20 +1,5 @@
 # CodeSensei — AI-Powered Inline Code Review Platform
 
-<div align="center">
-
-![CodeSensei Logo](frontend/public/codesensei_logo.png)
-
-**AI-powered code review that lives where your code does.**
-
-[![AWS](https://img.shields.io/badge/AWS-Serverless-orange?logo=amazon-aws)](https://aws.amazon.com/)
-[![React](https://img.shields.io/badge/React-19.2-blue?logo=react)](https://reactjs.org/)
-[![Monaco Editor](https://img.shields.io/badge/Monaco-Editor-purple)](https://microsoft.github.io/monaco-editor/)
-[![Claude AI](https://img.shields.io/badge/Claude-AI-green)](https://www.anthropic.com/)
-
-[Live Demo](https://main.dnq80x6al42k7.amplifyapp.com) · [Documentation](#documentation) · [Getting Started](#getting-started)
-
-</div>
-
 ---
 
 ## Table of Contents
