@@ -155,9 +155,17 @@ export default function ThreadPanel({
             return;
           }
 
-          const changes = Array.isArray(message.metadata.changes)
-            ? message.metadata.changes
-            : [];
+          // Support new format (replacement) and legacy format (changes array)
+          let replacement = "";
+          if (typeof message.metadata.replacement === "string") {
+            replacement = message.metadata.replacement;
+          } else if (Array.isArray(message.metadata.changes) && message.metadata.changes.length > 0) {
+            // Legacy: combine changes into single replacement
+            replacement = message.metadata.changes
+              .map((c) => c.replacement || "")
+              .join("\n");
+          }
+
           const contextMode =
             typeof message.metadata.context_mode === "string"
               ? message.metadata.context_mode
@@ -168,7 +176,7 @@ export default function ThreadPanel({
               : "improve";
 
           restoredExtras[message.message_id] = {
-            changes,
+            replacement,
             context_mode: contextMode,
             intent,
           };
@@ -333,25 +341,11 @@ export default function ThreadPanel({
 
       const analysis =
         typeof aiResponse?.analysis === "string" ? aiResponse.analysis : "";
-      const rawChanges = Array.isArray(aiResponse?.changes)
-        ? aiResponse.changes
-        : [];
-      const cleanedChanges = rawChanges
-        .filter(
-          (change) =>
-            change &&
-            typeof change === "object" &&
-            Number.isInteger(change.start_line) &&
-            Number.isInteger(change.end_line) &&
-            change.start_line >= 1 &&
-            change.end_line >= change.start_line &&
-            typeof change.replacement === "string"
-        )
-        .map((change) => ({
-          start_line: change.start_line,
-          end_line: change.end_line,
-          replacement: change.replacement,
-        }));
+      // New format: AI returns a single "replacement" field with the complete improved code
+      const replacement =
+        typeof aiResponse?.replacement === "string"
+          ? aiResponse.replacement
+          : "";
 
       const contextMode =
         typeof aiResponse?.context_mode === "string"
@@ -365,7 +359,7 @@ export default function ThreadPanel({
       const metadata = {
         intent,
         analysis,
-        changes: cleanedChanges,
+        replacement,
       };
 
       if (contextMode) {
@@ -407,7 +401,7 @@ export default function ThreadPanel({
           delete next[thinkingMessage.message_id];
         }
         next[aiMessage.message_id] = {
-          changes: cleanedChanges,
+          replacement,
           context_mode: contextMode,
           intent,
         };
@@ -477,15 +471,12 @@ export default function ThreadPanel({
   const handleCopyCode = useCallback(
     async (messageId) => {
       const extras = messageExtras[messageId];
-      const changes = extras?.changes || [];
+      const replacement = extras?.replacement || "";
 
-      if (changes.length === 0) {
+      if (!replacement.trim()) {
         setError("No suggested code available to copy.");
         return;
       }
-
-      // Combine all replacements into one string
-      const combinedCode = changes.map((c) => c.replacement).join("\n\n");
 
       try {
         if (
@@ -495,7 +486,7 @@ export default function ThreadPanel({
         ) {
           throw new Error("Clipboard API is not available");
         }
-        await navigator.clipboard.writeText(combinedCode);
+        await navigator.clipboard.writeText(replacement);
       } catch {
         setError("Unable to copy to clipboard. Please copy manually.");
       }
@@ -510,13 +501,13 @@ export default function ThreadPanel({
       }
 
       const extras = messageExtras[messageId];
-      const changes = extras?.changes || [];
-      if (changes.length === 0) {
+      const replacement = extras?.replacement || "";
+
+      if (!replacement.trim()) {
         return;
       }
 
-      // Use the THREAD's original selection range, not the AI's patch ranges
-      // This ensures we replace the entire block the user selected
+      // Use the THREAD's original selection range
       const threadStart = thread?.start_line;
       const threadEnd = thread?.end_line;
 
@@ -531,41 +522,12 @@ export default function ThreadPanel({
       // Original snippet is the FULL thread selection that will be replaced
       const originalSnippet = lines.slice(safeStart - 1, safeEnd).join("\n");
 
-      // Build the modified code by applying all AI changes to the thread's range
-      // Start with the original lines in the thread's range
-      let rangeLines = lines.slice(safeStart - 1, safeEnd);
-
-      // Sort changes by start_line descending to apply from bottom to top
-      const changesDescending = [...changes].sort(
-        (a, b) => b.start_line - a.start_line
-      );
-
-      for (const change of changesDescending) {
-        // Convert absolute line numbers to relative (within the thread's range)
-        const relativeStart = change.start_line - safeStart;
-        const relativeEnd = change.end_line - safeStart;
-        
-        // Skip changes that are outside the thread's range
-        if (relativeStart < 0 || relativeEnd >= rangeLines.length) {
-          continue;
-        }
-        
-        const replacementLines = change.replacement.split("\n");
-
-        // Replace the lines within our range
-        rangeLines.splice(
-          relativeStart,
-          relativeEnd - relativeStart + 1,
-          ...replacementLines
-        );
-      }
-
-      const modifiedSnippet = rangeLines.join("\n");
-
+      // The AI now returns the complete replacement for the entire selected block
+      // No need to merge patches - just use the replacement directly
       setDiffState({
         messageId,
         originalCode: originalSnippet,
-        modifiedCode: modifiedSnippet,
+        modifiedCode: replacement,
         language: toMonacoLanguage(sessionLanguage),
         startLine: safeStart,
         endLine: safeEnd,
@@ -618,7 +580,7 @@ export default function ThreadPanel({
         metadata: {
           patch_applied: true,
           applied_from_message_id: messageId,
-          changes: [],
+          replacement: "",
           intent: "info",
         },
       };
@@ -635,7 +597,7 @@ export default function ThreadPanel({
         setMessageExtras((prev) => ({
           ...prev,
           [confirmationMessage.message_id]: {
-            changes: [],
+            replacement: "",
             context_mode: null,
             intent: "info",
           },
@@ -725,10 +687,8 @@ export default function ThreadPanel({
           <ul className="message-list">
             {messages.map((message) => {
               const extras = messageExtras[message.message_id] || {};
-              const changeCount = Array.isArray(extras.changes)
-                ? extras.changes.length
-                : 0;
-              const hasDiff = message.role === "ai" && changeCount > 0;
+              const replacement = extras.replacement || "";
+              const hasDiff = message.role === "ai" && replacement.trim().length > 0;
               const isApplied =
                 message.role === "ai" &&
                 appliedMessageIds.has(message.message_id);
@@ -741,7 +701,7 @@ export default function ThreadPanel({
               const intent =
                 extras.intent ||
                 message.metadata?.intent ||
-                (changeCount > 0 ? "improve" : "explain");
+                (hasDiff ? "improve" : "explain");
 
               return (
                 <li

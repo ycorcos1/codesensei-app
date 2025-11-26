@@ -172,32 +172,32 @@ function buildSystemPrompt(language, contextMode, intent) {
     "Respond with ONLY a valid JSON object and nothing else.",
     "{",
     '  "analysis": "plain text explanation with no markdown or code fences",',
-    '  "changes": [',
-    '    { "start_line": number, "end_line": number, "replacement": "string" }',
-    "  ]",
+    '  "replacement": "complete replacement code for the entire selected block, or empty string if no changes needed"',
     "}",
-    "Line numbers must reference the original file, not the snippet.",
     "analysis must be plain sentences suitable for chat display (no markdown fences, headers, or bullet markers).",
+    "replacement must be the COMPLETE improved version of the ENTIRE selected code block - not partial patches.",
+    "Do NOT include markdown code fences (```) in the replacement field - just raw code.",
   ];
 
   if (intent === "explain") {
     common.push(
       "The user wants an explanation of the selected code.",
       "Describe what the code does, key behaviors, and any noteworthy edge cases in analysis.",
-      "Do NOT suggest code changes. Return an empty changes array [].",
-      "If the user explicitly asks for improvements, acknowledge that in analysis but keep changes empty."
+      "Do NOT suggest code changes. Return an empty string for replacement.",
+      "If the user explicitly asks for improvements, acknowledge that in analysis but keep replacement empty."
     );
   } else {
     common.push(
       "The user wants to improve the code.",
-      "If improvements are possible, return one or more entries in changes with the exact replacement code.",
-      "If the code is already acceptable, return an empty changes array [] and explain why no changes are needed."
+      "If improvements are possible, return the COMPLETE improved version of the entire selected block in replacement.",
+      "The replacement must be a full, working version of the code that can directly replace the selected lines.",
+      "If the code is already acceptable, return an empty string for replacement and explain why no changes are needed."
     );
   }
 
   if (contextMode === "local") {
     common.push(
-      "The user only provided a portion of the file. When referencing line numbers, ALWAYS use the original file numbering as communicated in the prompt."
+      "Focus only on improving the selected region. The replacement should cover the entire selected block."
     );
   }
 
@@ -222,20 +222,18 @@ function buildUserPrompt({
       : "";
 
   const selectionText = selection
-    ? `Selected region (lines ${selection.start_line}-${
-        selection.end_line
-      }):\n${selection.selected_text || "(selection text not provided)"}\n\n`
+    ? `Selected region (lines ${selection.start_line}-${selection.end_line}):\n\`\`\`\n${selection.selected_text || "(selection text not provided)"}\n\`\`\`\n\nIMPORTANT: If you suggest improvements, your replacement field must contain the COMPLETE improved version of this entire selected block (lines ${selection.start_line}-${selection.end_line}). Do not return partial patches.\n\n`
     : "Full file review requested.\n\n";
 
   const contextNote =
     contextMode === "local"
-      ? `Context note: You are viewing lines ${actualStartLine}-${actualEndLine} from the original file. When you reference or return line numbers (e.g., in patch.start_line), use ORIGINAL file line numbers.\n\n`
+      ? `Context note: You are viewing lines ${actualStartLine}-${actualEndLine} from the original file for context.\n\n`
       : "";
 
   const promptSections = [
     `Language: ${language}`,
     contextNote,
-    "Code snippet:",
+    "Full file context:",
     "```",
     code,
     "```",
@@ -495,37 +493,27 @@ function parseBedrockResponse(bedrockResponse) {
     throw new Error("AI_MALFORMED_RESPONSE");
   }
 
-  if (!Array.isArray(jsonPayload.changes)) {
-    throw new Error("AI_MALFORMED_RESPONSE");
-  }
-
   const analysis = sanitizeAnalysisText(jsonPayload.analysis);
   if (!analysis.trim()) {
     throw new Error("AI_MALFORMED_RESPONSE");
   }
-  const changes = jsonPayload.changes.map((change) => {
-    if (
-      !change ||
-      typeof change !== "object" ||
-      !Number.isInteger(change.start_line) ||
-      !Number.isInteger(change.end_line) ||
-      change.start_line < 1 ||
-      change.end_line < change.start_line ||
-      typeof change.replacement !== "string"
-    ) {
-      throw new Error("AI_MALFORMED_RESPONSE");
-    }
 
-    return {
-      start_line: change.start_line,
-      end_line: change.end_line,
-      replacement: sanitizeReplacementCode(change.replacement),
-    };
-  });
+  // Handle the new simplified format: single "replacement" field instead of "changes" array
+  // The replacement is the complete improved version of the entire selected block
+  let replacement = "";
+  if (typeof jsonPayload.replacement === "string") {
+    replacement = sanitizeReplacementCode(jsonPayload.replacement);
+  } else if (Array.isArray(jsonPayload.changes) && jsonPayload.changes.length > 0) {
+    // Backwards compatibility: if old format with changes array, combine them
+    // This shouldn't happen with the new prompt but handles edge cases
+    replacement = jsonPayload.changes
+      .map((c) => sanitizeReplacementCode(c.replacement || ""))
+      .join("\n");
+  }
 
   return {
     analysis,
-    changes,
+    replacement,
   };
 }
 
@@ -584,42 +572,19 @@ async function callBedrock({
   );
   const parsed = parseBedrockResponse(bedrockResponse);
 
-  if (intentMode === "explain" && parsed.changes.length > 0) {
-    throw new Error("AI_MALFORMED_RESPONSE");
+  // For explain mode, replacement should be empty
+  if (intentMode === "explain" && parsed.replacement && parsed.replacement.trim()) {
+    // AI provided code when it shouldn't have - just ignore it
+    parsed.replacement = "";
   }
 
-  const translatedChanges =
-    contextMode === "local"
-      ? parsed.changes.map((change) => {
-          const snippetLineCount = effectiveCode.split("\n").length;
-          const appearsRelative =
-            change.start_line >= 1 &&
-            change.end_line >= change.start_line &&
-            change.end_line <= snippetLineCount &&
-            actualStartLine > 1;
-
-          if (appearsRelative) {
-            return {
-              ...change,
-              start_line: change.start_line + actualStartLine - 1,
-              end_line: change.end_line + actualStartLine - 1,
-            };
-          }
-
-          return change;
-        })
-      : parsed.changes;
-
   const analysisLength = parsed.analysis.length || 0;
-  const replacementLength = translatedChanges.reduce(
-    (total, change) => total + (change.replacement?.length || 0),
-    0
-  );
+  const replacementLength = parsed.replacement?.length || 0;
   const outputTokens = Math.ceil((analysisLength + replacementLength) / 4);
 
   return {
     analysis: parsed.analysis,
-    changes: translatedChanges,
+    replacement: parsed.replacement || "",
     context_mode: contextMode,
     token_count: inputTokens + outputTokens,
     intent: intentMode,

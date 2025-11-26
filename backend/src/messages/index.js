@@ -222,6 +222,15 @@ async function handleCreateMessage(event) {
         metadata.analysis = payload.metadata.analysis;
       }
 
+      // Support new format: single replacement field
+      if (payload.metadata.replacement !== undefined) {
+        if (typeof payload.metadata.replacement !== 'string') {
+          throw new Error('INVALID_METADATA_REPLACEMENT');
+        }
+        metadata.replacement = payload.metadata.replacement;
+      }
+
+      // Legacy support: changes array (for backwards compatibility)
       if (payload.metadata.changes !== undefined) {
         if (!Array.isArray(payload.metadata.changes)) {
           throw new Error('INVALID_METADATA_CHANGES');
@@ -349,6 +358,13 @@ async function handleCreateMessage(event) {
           'INVALID_INPUT',
           'metadata.analysis must be a string.',
           'metadata.analysis',
+        );
+      case 'INVALID_METADATA_REPLACEMENT':
+        return error(
+          400,
+          'INVALID_INPUT',
+          'metadata.replacement must be a string.',
+          'metadata.replacement',
         );
       case 'INVALID_METADATA_CHANGES':
         return error(
