@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import PropTypes from "prop-types";
 import { DiffEditor } from "@monaco-editor/react";
 
@@ -14,6 +14,9 @@ export default function DiffModal({
   isApplying,
   canApply,
 }) {
+  const editorRef = useRef(null);
+  const [editorKey, setEditorKey] = useState(0);
+
   const handleKeyDown = useCallback(
     (event) => {
       if (event.key === "Escape" && isOpen) {
@@ -33,9 +36,36 @@ export default function DiffModal({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isOpen, handleKeyDown]);
 
+  // Generate a new key each time the modal opens to get a fresh editor instance
+  useEffect(() => {
+    if (isOpen) {
+      setEditorKey((prev) => prev + 1);
+    }
+  }, [isOpen]);
+
+  const handleEditorDidMount = (editor) => {
+    editorRef.current = editor;
+  };
+
+  const handleClose = useCallback(() => {
+    // Dispose the editor before closing to prevent the "TextModel got disposed" error
+    if (editorRef.current) {
+      try {
+        const modifiedEditor = editorRef.current.getModifiedEditor();
+        const originalEditor = editorRef.current.getOriginalEditor();
+        if (modifiedEditor) modifiedEditor.setModel(null);
+        if (originalEditor) originalEditor.setModel(null);
+      } catch (e) {
+        // Ignore disposal errors
+      }
+      editorRef.current = null;
+    }
+    onClose();
+  }, [onClose]);
+
   const handleOverlayClick = (event) => {
     if (event.target === event.currentTarget) {
-      onClose();
+      handleClose();
     }
   };
 
@@ -44,19 +74,18 @@ export default function DiffModal({
       ? ` (Lines ${startLine}\u2013${endLine})`
       : "";
 
-  const overlayStyle = {
-    display: isOpen ? "flex" : "none",
-  };
+  // Don't render the modal at all when closed - this prevents stale editor state
+  if (!isOpen) {
+    return null;
+  }
 
   return (
     <div
       className="diff-modal-overlay"
       role="dialog"
       aria-modal="true"
-      aria-hidden={!isOpen}
       aria-label="Review code changes"
       onClick={handleOverlayClick}
-      style={overlayStyle}
     >
       <div className="diff-modal-card">
         <header className="diff-modal-header">
@@ -64,9 +93,8 @@ export default function DiffModal({
           <button
             type="button"
             className="diff-modal-close"
-            onClick={onClose}
+            onClick={handleClose}
             aria-label="Close diff modal"
-            tabIndex={isOpen ? 0 : -1}
           >
             ×
           </button>
@@ -74,10 +102,12 @@ export default function DiffModal({
         <div className="diff-modal-body">
           {originalCode || modifiedCode ? (
             <DiffEditor
+              key={editorKey}
               original={originalCode}
               modified={modifiedCode}
               language={language}
               theme="vs-dark"
+              onMount={handleEditorDidMount}
               options={{
                 renderSideBySide: true,
                 readOnly: true,
@@ -93,9 +123,8 @@ export default function DiffModal({
           <button
             type="button"
             className="btn btn-secondary btn-small"
-            onClick={onClose}
+            onClick={handleClose}
             disabled={isApplying}
-            tabIndex={isOpen ? 0 : -1}
           >
             Cancel
           </button>
@@ -105,7 +134,6 @@ export default function DiffModal({
               className="btn btn-primary btn-small"
               onClick={onApply}
               disabled={isApplying}
-              tabIndex={isOpen ? 0 : -1}
             >
               {isApplying ? "Applying..." : "Apply Patch"}
             </button>
