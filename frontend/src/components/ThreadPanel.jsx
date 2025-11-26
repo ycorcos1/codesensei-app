@@ -732,11 +732,10 @@ export default function ThreadPanel({
                         Used local context
                       </span>
                     ) : null}
-                    {intent === "explain" && !hasDiff ? (
-                      <span className="message-applied-badge">Explanation</span>
-                    ) : null}
                     {isApplied ? (
-                      <span className="message-applied-badge">Patch applied</span>
+                      <span className="message-applied-badge">
+                        Patch applied
+                      </span>
                     ) : null}
                   </div>
                   {hasDiff ? (
@@ -790,7 +789,9 @@ export default function ThreadPanel({
         />
         <div className="thread-panel-input-footer">
           <span
-            className={`char-counter${isOverWarning ? " char-counter-warning" : ""}`}
+            className={`char-counter${
+              isOverWarning ? " char-counter-warning" : ""
+            }`}
             aria-live="polite"
           >
             {charCount} / {MAX_MESSAGE_LENGTH}
@@ -812,7 +813,8 @@ export default function ThreadPanel({
         originalCode={diffState?.originalCode || ""}
         modifiedCode={diffState?.modifiedCode || ""}
         language={
-          diffState?.language || toMonacoLanguage(sessionLanguage || "Plain Text")
+          diffState?.language ||
+          toMonacoLanguage(sessionLanguage || "Plain Text")
         }
         startLine={diffState?.startLine}
         endLine={diffState?.endLine}
@@ -846,4 +848,3 @@ ThreadPanel.defaultProps = {
   sessionLanguage: "Plain Text",
   onApplyPatch: null,
 };
-

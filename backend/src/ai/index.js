@@ -410,8 +410,24 @@ function parseBedrockResponse(bedrockResponse) {
     }
     jsonPayload = JSON.parse(responseText.slice(firstBrace, lastBrace + 1));
   } catch (err) {
-    console.error("[ai] Failed to parse AI response JSON:", err, responseText);
-    throw new Error("AI_MALFORMED_RESPONSE");
+    try {
+      const normalized = responseText
+        .replace(/'([A-Za-z0-9_]+)'\s*:/g, '"$1":') // 'key': -> "key":
+        .replace(/([{,]\s*)"([^"]+)":\s*'([^']*)'/g, '$1"$2":"$3"'); // "key": 'value' -> "key":"value"
+      const firstBrace = normalized.indexOf("{");
+      const lastBrace = normalized.lastIndexOf("}");
+      if (firstBrace === -1 || lastBrace === -1) {
+        throw new Error("NO_JSON_OBJECT");
+      }
+      jsonPayload = JSON.parse(normalized.slice(firstBrace, lastBrace + 1));
+    } catch (secondaryError) {
+      console.error(
+        "[ai] Failed to parse AI response JSON:",
+        secondaryError,
+        responseText
+      );
+      throw new Error("AI_MALFORMED_RESPONSE");
+    }
   }
 
   if (
