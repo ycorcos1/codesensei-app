@@ -563,46 +563,51 @@ export default function EditorPage() {
       }
 
       // Sort patches by start_line descending to apply from bottom to top
+      // This preserves line numbers for patches above the current one
       const sortedPatches = [...patches].sort(
         (a, b) => b.start_line - a.start_line
       );
 
-      // Build all edits
-      const allEdits = [];
-      let lineCount = model.getLineCount();
+      // Apply patches one at a time from bottom to top
+      editorInstance.pushUndoStop();
 
       for (const patch of sortedPatches) {
+        const currentModel = editorInstance.getModel();
+        if (!currentModel) break;
+
+        const lineCount = currentModel.getLineCount();
         const startLine = Number(patch.start_line);
         const endLine = Number(patch.end_line);
         const boundedStart = Math.max(1, Math.min(startLine, lineCount));
         const boundedEnd = Math.max(boundedStart, Math.min(endLine, lineCount));
-        const endColumn = model.getLineMaxColumn(boundedEnd) || 1;
+        const endColumn = currentModel.getLineMaxColumn(boundedEnd) || 1;
 
+        let edit;
         if (startLine > lineCount) {
-          allEdits.push({
+          edit = {
             range: new monaco.Range(
               lineCount,
-              model.getLineMaxColumn(lineCount),
+              currentModel.getLineMaxColumn(lineCount),
               lineCount,
-              model.getLineMaxColumn(lineCount)
+              currentModel.getLineMaxColumn(lineCount)
             ),
             text:
-              (lineCount > 0 && model.getLineContent(lineCount).length > 0
+              (lineCount > 0 && currentModel.getLineContent(lineCount).length > 0
                 ? "\n"
                 : "") + patch.replacement,
             forceMoveMarkers: true,
-          });
+          };
         } else {
-          allEdits.push({
+          edit = {
             range: new monaco.Range(boundedStart, 1, boundedEnd, endColumn),
             text: patch.replacement,
             forceMoveMarkers: true,
-          });
+          };
         }
+
+        editorInstance.executeEdits("codesensei.aiPatch", [edit]);
       }
 
-      editorInstance.pushUndoStop();
-      editorInstance.executeEdits("codesensei.aiPatch", allEdits);
       editorInstance.pushUndoStop();
 
       const updatedCode = model.getValue();
@@ -632,10 +637,7 @@ export default function EditorPage() {
             : patch.replacement.split("\n").length;
       }
       const lineDelta = totalNewLines - totalOriginalLines;
-      const newEndLine = Math.max(
-        boundedStart,
-        lastPatch.end_line + lineDelta
-      );
+      const newEndLine = Math.max(boundedStart, lastPatch.end_line + lineDelta);
 
       // Get the new selected text from the updated code
       const updatedLines = updatedCode.split("\n");

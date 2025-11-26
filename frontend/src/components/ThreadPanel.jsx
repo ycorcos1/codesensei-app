@@ -547,23 +547,26 @@ export default function ThreadPanel({
         const startIdx = change.start_line - 1;
         const endIdx = change.end_line;
         const replacementLines = change.replacement.split("\n");
-        modifiedLines.splice(
-          startIdx,
-          endIdx - startIdx,
-          ...replacementLines
-        );
+        modifiedLines.splice(startIdx, endIdx - startIdx, ...replacementLines);
       }
 
       // Extract the modified snippet for the same conceptual range
       // After modifications, line numbers shift, so show the full modified section
       const modifiedSnippet = modifiedLines
-        .slice(safeStart - 1, safeStart - 1 + (modifiedLines.length - lines.length) + (sliceEnd - safeStart + 1))
+        .slice(
+          safeStart - 1,
+          safeStart -
+            1 +
+            (modifiedLines.length - lines.length) +
+            (sliceEnd - safeStart + 1)
+        )
         .join("\n");
 
       setDiffState({
         messageId,
         originalCode: originalSnippet,
-        modifiedCode: modifiedSnippet || sortedChanges.map((c) => c.replacement).join("\n"),
+        modifiedCode:
+          modifiedSnippet || sortedChanges.map((c) => c.replacement).join("\n"),
         language: toMonacoLanguage(sessionLanguage),
         startLine: safeStart,
         endLine: safeEnd,
@@ -578,7 +581,12 @@ export default function ThreadPanel({
   }, []);
 
   const handleApplyPatchFromDiff = useCallback(async () => {
-    if (!diffState?.changes || diffState.changes.length === 0 || !onApplyPatch || !threadId) {
+    if (
+      !diffState?.changes ||
+      diffState.changes.length === 0 ||
+      !onApplyPatch ||
+      !threadId
+    ) {
       return;
     }
 
