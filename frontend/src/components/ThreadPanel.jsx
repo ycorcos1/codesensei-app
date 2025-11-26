@@ -515,44 +515,43 @@ export default function ThreadPanel({
         return;
       }
 
-      // Sort changes by start_line ascending
-      const sortedChanges = [...changes].sort(
-        (a, b) => a.start_line - b.start_line
-      );
+      // Use the THREAD's original selection range, not the AI's patch ranges
+      // This ensures we replace the entire block the user selected
+      const threadStart = thread?.start_line;
+      const threadEnd = thread?.end_line;
 
-      // Find the overall range that needs to be replaced
-      const overallStart = Math.min(...sortedChanges.map((c) => c.start_line));
-      const overallEnd = Math.max(...sortedChanges.map((c) => c.end_line));
-
-      if (!Number.isInteger(overallStart) || !Number.isInteger(overallEnd)) {
+      if (!Number.isInteger(threadStart) || !Number.isInteger(threadEnd)) {
         return;
       }
 
       const lines = (sessionCode || "").split("\n");
-      const safeStart = Math.max(1, overallStart);
-      const safeEnd = Math.max(safeStart, Math.min(overallEnd, lines.length));
-      
-      // Original snippet is the lines that will be replaced
+      const safeStart = Math.max(1, threadStart);
+      const safeEnd = Math.max(safeStart, Math.min(threadEnd, lines.length));
+
+      // Original snippet is the FULL thread selection that will be replaced
       const originalSnippet = lines.slice(safeStart - 1, safeEnd).join("\n");
 
-      // Build the modified code by applying all changes to a copy of the ORIGINAL RANGE
-      // We need to transform the original snippet into the modified snippet
-      // by applying each change relative to the range start
-      
-      // Start with the original lines in the range
+      // Build the modified code by applying all AI changes to the thread's range
+      // Start with the original lines in the thread's range
       let rangeLines = lines.slice(safeStart - 1, safeEnd);
-      
-      // Apply changes from bottom to top (relative to the range)
-      const changesDescending = [...sortedChanges].sort(
+
+      // Sort changes by start_line descending to apply from bottom to top
+      const changesDescending = [...changes].sort(
         (a, b) => b.start_line - a.start_line
       );
-      
+
       for (const change of changesDescending) {
-        // Convert absolute line numbers to relative (within the range)
+        // Convert absolute line numbers to relative (within the thread's range)
         const relativeStart = change.start_line - safeStart;
         const relativeEnd = change.end_line - safeStart;
-        const replacementLines = change.replacement.split("\n");
         
+        // Skip changes that are outside the thread's range
+        if (relativeStart < 0 || relativeEnd >= rangeLines.length) {
+          continue;
+        }
+        
+        const replacementLines = change.replacement.split("\n");
+
         // Replace the lines within our range
         rangeLines.splice(
           relativeStart,
@@ -560,7 +559,7 @@ export default function ThreadPanel({
           ...replacementLines
         );
       }
-      
+
       const modifiedSnippet = rangeLines.join("\n");
 
       setDiffState({
@@ -570,10 +569,9 @@ export default function ThreadPanel({
         language: toMonacoLanguage(sessionLanguage),
         startLine: safeStart,
         endLine: safeEnd,
-        changes: sortedChanges,
       });
     },
-    [appliedMessageIds, messageExtras, sessionLanguage, sessionCode]
+    [appliedMessageIds, messageExtras, sessionLanguage, sessionCode, thread]
   );
 
   const handleCloseDiff = useCallback(() => {
