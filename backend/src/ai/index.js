@@ -467,6 +467,7 @@ function parseBedrockResponse(bedrockResponse) {
       throw new Error("NO_JSON_OBJECT");
     }
     const rawObject = responseText.slice(firstBrace, lastBrace + 1);
+    console.error("[ai] Raw Bedrock response:", rawObject);
     const escapedObject = escapeNewlinesInStrings(rawObject);
     try {
       jsonPayload = JSON.parse(escapedObject);
