@@ -395,6 +395,63 @@ function sanitizeReplacementCode(code) {
   return cleaned;
 }
 
+function escapeNewlinesInStrings(input) {
+  if (typeof input !== "string" || input.length === 0) {
+    return "";
+  }
+
+  let result = "";
+  let insideString = false;
+  let delimiter = null;
+  let escaping = false;
+
+  for (let i = 0; i < input.length; i += 1) {
+    const char = input[i];
+
+    if (!insideString) {
+      if (char === '"' || char === "'") {
+        insideString = true;
+        delimiter = char;
+      }
+      result += char;
+      continue;
+    }
+
+    if (escaping) {
+      result += char;
+      escaping = false;
+      continue;
+    }
+
+    if (char === "\\") {
+      result += char;
+      escaping = true;
+      continue;
+    }
+
+    if (char === delimiter) {
+      insideString = false;
+      delimiter = null;
+      result += char;
+      continue;
+    }
+
+    if (char === "\n") {
+      result += "\\n";
+      continue;
+    }
+
+    if (char === "\r") {
+      result += "\\r";
+      continue;
+    }
+
+    result += char;
+  }
+
+  return result;
+}
+
 function parseBedrockResponse(bedrockResponse) {
   const responseText = extractResponseText(bedrockResponse);
 
@@ -410,14 +467,16 @@ function parseBedrockResponse(bedrockResponse) {
       throw new Error("NO_JSON_OBJECT");
     }
     const rawObject = responseText.slice(firstBrace, lastBrace + 1);
+    const escapedObject = escapeNewlinesInStrings(rawObject);
     try {
-      jsonPayload = JSON.parse(rawObject);
+      jsonPayload = JSON.parse(escapedObject);
     } catch (err) {
-      jsonPayload = JSON5.parse(rawObject);
+      jsonPayload = JSON5.parse(escapedObject);
     }
   } catch (err) {
     try {
-      jsonPayload = JSON5.parse(responseText);
+      const escaped = escapeNewlinesInStrings(responseText);
+      jsonPayload = JSON5.parse(escaped);
     } catch (secondaryError) {
       console.error(
         "[ai] Failed to parse AI response JSON:",
