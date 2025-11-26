@@ -1,25 +1,12 @@
 import { Link } from "react-router-dom";
+import PublicNav from "../components/PublicNav";
 
 function About() {
   return (
     <div className="about-page">
-      <nav className="about-nav" aria-label="Primary">
-        <Link to="/" className="about-nav-brand">
-          <img
-            src="/codesensei_logo.png"
-            alt="CodeSensei logo"
-            className="about-nav-logo"
-          />
-        </Link>
-        <div className="about-nav-links">
-          <Link to="/login" className="btn btn-secondary btn-small">
-            Login
-          </Link>
-          <Link to="/signup" className="btn btn-primary btn-small">
-            Get Started
-          </Link>
-        </div>
-      </nav>
+      <header className="landing-header">
+        <PublicNav />
+      </header>
 
       <header className="about-hero">
         <img

@@ -197,6 +197,11 @@ export default function Signup() {
   return (
     <div className="auth-page">
       <div className="auth-card">
+        <div className="auth-card-nav">
+          <Link to="/dashboard" className="auth-back-link">
+            Back to Dashboard
+          </Link>
+        </div>
         <h1 className="auth-title">Create Account</h1>
 
         {apiError && <div className="auth-error-banner">{apiError}</div>}

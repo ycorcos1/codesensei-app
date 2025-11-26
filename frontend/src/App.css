@@ -87,10 +87,39 @@ a:hover {
 .auth-page {
   min-height: 100vh;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   background-color: var(--dark-gray);
   padding: 24px;
+  gap: 0;
+}
+
+.auth-card-nav {
+  width: 100%;
+  margin-bottom: 16px;
+}
+
+.auth-back-link {
+  color: var(--blood-orange);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: color 0.15s ease;
+}
+
+.auth-back-link::before {
+  content: "←";
+  font-size: 14px;
+  line-height: 1;
+}
+
+.auth-back-link:hover {
+  color: #ffa98e;
 }
 
 .auth-card {
@@ -1961,8 +1990,40 @@ a:hover {
 }
 
 .landing-feature-icon {
-  font-size: 48px;
-  margin-bottom: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 24px;
+  border-radius: 16px;
+  background-color: rgba(255, 74, 31, 0.08);
+  border: 1px solid rgba(255, 74, 31, 0.25);
+  color: var(--blood-orange);
+}
+
+.landing-feature-svg {
+  width: 44px;
+  height: 44px;
+  stroke: var(--blood-orange);
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+}
+
+.landing-feature-dot {
+  fill: var(--blood-orange);
+  stroke: none;
+}
+
+.landing-feature-card:hover .landing-feature-icon {
+  background-color: rgba(255, 74, 31, 0.12);
+  border-color: var(--blood-orange);
+}
+
+.landing-feature-card:hover .landing-feature-svg {
+  stroke: var(--blood-orange);
 }
 
 .landing-feature-title {
