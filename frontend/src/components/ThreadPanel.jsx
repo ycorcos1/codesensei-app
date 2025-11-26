@@ -515,12 +515,12 @@ export default function ThreadPanel({
         return;
       }
 
-      // Sort changes by start_line descending so we can apply from bottom to top
+      // Sort changes by start_line ascending
       const sortedChanges = [...changes].sort(
         (a, b) => a.start_line - b.start_line
       );
 
-      // Find the overall range
+      // Find the overall range that needs to be replaced
       const overallStart = Math.min(...sortedChanges.map((c) => c.start_line));
       const overallEnd = Math.max(...sortedChanges.map((c) => c.end_line));
 
@@ -530,43 +530,43 @@ export default function ThreadPanel({
 
       const lines = (sessionCode || "").split("\n");
       const safeStart = Math.max(1, overallStart);
-      const safeEnd = Math.max(safeStart, overallEnd);
-      const sliceEnd = Math.min(safeEnd, lines.length);
-      const originalSnippet =
-        sliceEnd >= safeStart
-          ? lines.slice(safeStart - 1, sliceEnd).join("\n")
-          : "";
+      const safeEnd = Math.max(safeStart, Math.min(overallEnd, lines.length));
+      
+      // Original snippet is the lines that will be replaced
+      const originalSnippet = lines.slice(safeStart - 1, safeEnd).join("\n");
 
-      // Build the modified code by applying all changes to the original
-      let modifiedLines = [...lines];
-      // Apply changes from bottom to top to preserve line numbers
+      // Build the modified code by applying all changes to a copy of the ORIGINAL RANGE
+      // We need to transform the original snippet into the modified snippet
+      // by applying each change relative to the range start
+      
+      // Start with the original lines in the range
+      let rangeLines = lines.slice(safeStart - 1, safeEnd);
+      
+      // Apply changes from bottom to top (relative to the range)
       const changesDescending = [...sortedChanges].sort(
         (a, b) => b.start_line - a.start_line
       );
+      
       for (const change of changesDescending) {
-        const startIdx = change.start_line - 1;
-        const endIdx = change.end_line;
+        // Convert absolute line numbers to relative (within the range)
+        const relativeStart = change.start_line - safeStart;
+        const relativeEnd = change.end_line - safeStart;
         const replacementLines = change.replacement.split("\n");
-        modifiedLines.splice(startIdx, endIdx - startIdx, ...replacementLines);
+        
+        // Replace the lines within our range
+        rangeLines.splice(
+          relativeStart,
+          relativeEnd - relativeStart + 1,
+          ...replacementLines
+        );
       }
-
-      // Extract the modified snippet for the same conceptual range
-      // After modifications, line numbers shift, so show the full modified section
-      const modifiedSnippet = modifiedLines
-        .slice(
-          safeStart - 1,
-          safeStart -
-            1 +
-            (modifiedLines.length - lines.length) +
-            (sliceEnd - safeStart + 1)
-        )
-        .join("\n");
+      
+      const modifiedSnippet = rangeLines.join("\n");
 
       setDiffState({
         messageId,
         originalCode: originalSnippet,
-        modifiedCode:
-          modifiedSnippet || sortedChanges.map((c) => c.replacement).join("\n"),
+        modifiedCode: modifiedSnippet,
         language: toMonacoLanguage(sessionLanguage),
         startLine: safeStart,
         endLine: safeEnd,
@@ -864,8 +864,12 @@ export default function ThreadPanel({
         endLine={diffState?.endLine}
         isApplying={applyingPatch}
         canApply={
-          Boolean(diffState?.modifiedCode && diffState?.startLine && diffState?.endLine && onApplyPatch) &&
-          !appliedMessageIds.has(diffState?.messageId || "")
+          Boolean(
+            diffState?.modifiedCode &&
+              diffState?.startLine &&
+              diffState?.endLine &&
+              onApplyPatch
+          ) && !appliedMessageIds.has(diffState?.messageId || "")
         }
       />
     </aside>
