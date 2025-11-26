@@ -516,13 +516,39 @@ export default function EditorPage() {
   }, [fetchThreads, normalizeThreadEntity, sessionId]);
 
   const handleApplyPatch = useCallback(
-    async (patch) => {
+    async (patchOrPatches) => {
       const editorInstance = editorRef.current;
       const monaco = monacoRef.current;
 
-      if (!patch || typeof patch.replacement !== "string") {
-        setError("Invalid patch payload received from AI.");
+      // Normalize to array of patches
+      const patches = Array.isArray(patchOrPatches)
+        ? patchOrPatches
+        : [patchOrPatches];
+
+      if (patches.length === 0) {
+        setError("No patches to apply.");
         return;
+      }
+
+      // Validate all patches first
+      for (const patch of patches) {
+        if (!patch || typeof patch.replacement !== "string") {
+          setError("Invalid patch payload received from AI.");
+          return;
+        }
+        const startLine = Number(patch.start_line);
+        const endLine = Number(patch.end_line);
+        if (
+          !Number.isInteger(startLine) ||
+          !Number.isInteger(endLine) ||
+          startLine < 1 ||
+          endLine < startLine
+        ) {
+          setError(
+            "Unable to apply AI patch because the provided line numbers are invalid."
+          );
+          return;
+        }
       }
 
       if (!editorInstance || !monaco) {
@@ -536,67 +562,86 @@ export default function EditorPage() {
         return;
       }
 
-      const startLine = Number(patch.start_line);
-      const endLine = Number(patch.end_line);
+      // Sort patches by start_line descending to apply from bottom to top
+      const sortedPatches = [...patches].sort(
+        (a, b) => b.start_line - a.start_line
+      );
 
-      if (
-        !Number.isInteger(startLine) ||
-        !Number.isInteger(endLine) ||
-        startLine < 1 ||
-        endLine < startLine
-      ) {
-        setError(
-          "Unable to apply AI patch because the provided line numbers are invalid."
-        );
-        return;
+      // Build all edits
+      const allEdits = [];
+      let lineCount = model.getLineCount();
+
+      for (const patch of sortedPatches) {
+        const startLine = Number(patch.start_line);
+        const endLine = Number(patch.end_line);
+        const boundedStart = Math.max(1, Math.min(startLine, lineCount));
+        const boundedEnd = Math.max(boundedStart, Math.min(endLine, lineCount));
+        const endColumn = model.getLineMaxColumn(boundedEnd) || 1;
+
+        if (startLine > lineCount) {
+          allEdits.push({
+            range: new monaco.Range(
+              lineCount,
+              model.getLineMaxColumn(lineCount),
+              lineCount,
+              model.getLineMaxColumn(lineCount)
+            ),
+            text:
+              (lineCount > 0 && model.getLineContent(lineCount).length > 0
+                ? "\n"
+                : "") + patch.replacement,
+            forceMoveMarkers: true,
+          });
+        } else {
+          allEdits.push({
+            range: new monaco.Range(boundedStart, 1, boundedEnd, endColumn),
+            text: patch.replacement,
+            forceMoveMarkers: true,
+          });
+        }
       }
 
-      const lineCount = model.getLineCount();
-      const boundedStart = Math.max(1, Math.min(startLine, lineCount));
-      const boundedEnd = Math.max(boundedStart, Math.min(endLine, lineCount));
-      const endColumn = model.getLineMaxColumn(boundedEnd) || 1;
-
-      const edits =
-        startLine > lineCount
-          ? [
-              {
-                range: new monaco.Range(
-                  lineCount,
-                  model.getLineMaxColumn(lineCount),
-                  lineCount,
-                  model.getLineMaxColumn(lineCount)
-                ),
-                text:
-                  (lineCount > 0 && model.getLineContent(lineCount).length > 0
-                    ? "\n"
-                    : "") + patch.replacement,
-                forceMoveMarkers: true,
-              },
-            ]
-          : [
-              {
-                range: new monaco.Range(boundedStart, 1, boundedEnd, endColumn),
-                text: patch.replacement,
-                forceMoveMarkers: true,
-              },
-            ];
-
       editorInstance.pushUndoStop();
-      editorInstance.executeEdits("codesensei.aiPatch", edits);
+      editorInstance.executeEdits("codesensei.aiPatch", allEdits);
       editorInstance.pushUndoStop();
 
       const updatedCode = model.getValue();
       setCode(updatedCode);
       setIsDirty(true);
 
-      const replacementLineCount =
-        patch.replacement.length === 0
-          ? 0
-          : patch.replacement.split("\n").length;
-      const newEndLine =
-        replacementLineCount > 0
-          ? boundedStart + replacementLineCount - 1
-          : boundedStart;
+      // Calculate the new range based on all patches
+      const firstPatch = patches.reduce(
+        (min, p) => (p.start_line < min.start_line ? p : min),
+        patches[0]
+      );
+      const lastPatch = patches.reduce(
+        (max, p) => (p.end_line > max.end_line ? p : max),
+        patches[0]
+      );
+
+      const boundedStart = Math.max(1, firstPatch.start_line);
+
+      // Calculate how many lines were added/removed
+      let totalOriginalLines = 0;
+      let totalNewLines = 0;
+      for (const patch of patches) {
+        totalOriginalLines += patch.end_line - patch.start_line + 1;
+        totalNewLines +=
+          patch.replacement.length === 0
+            ? 0
+            : patch.replacement.split("\n").length;
+      }
+      const lineDelta = totalNewLines - totalOriginalLines;
+      const newEndLine = Math.max(
+        boundedStart,
+        lastPatch.end_line + lineDelta
+      );
+
+      // Get the new selected text from the updated code
+      const updatedLines = updatedCode.split("\n");
+      const newSelectedText = updatedLines
+        .slice(boundedStart - 1, newEndLine)
+        .join("\n");
 
       if (!sessionId || !session) {
         setError(
@@ -638,7 +683,7 @@ export default function EditorPage() {
               {
                 start_line: boundedStart,
                 end_line: newEndLine,
-                selected_text: patch.replacement,
+                selected_text: newSelectedText,
               }
             );
             const updatedThread =
@@ -653,7 +698,7 @@ export default function EditorPage() {
                       start_line: updatedThread.start_line ?? boundedStart,
                       end_line: updatedThread.end_line ?? newEndLine,
                       selected_text:
-                        updatedThread.selected_text ?? patch.replacement,
+                        updatedThread.selected_text ?? newSelectedText,
                     }
                   : threadItem
               )

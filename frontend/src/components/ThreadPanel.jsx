@@ -477,12 +477,15 @@ export default function ThreadPanel({
   const handleCopyCode = useCallback(
     async (messageId) => {
       const extras = messageExtras[messageId];
-      const replacement = extras?.changes?.[0]?.replacement;
+      const changes = extras?.changes || [];
 
-      if (!replacement) {
+      if (changes.length === 0) {
         setError("No suggested code available to copy.");
         return;
       }
+
+      // Combine all replacements into one string
+      const combinedCode = changes.map((c) => c.replacement).join("\n\n");
 
       try {
         if (
@@ -492,7 +495,7 @@ export default function ThreadPanel({
         ) {
           throw new Error("Clipboard API is not available");
         }
-        await navigator.clipboard.writeText(replacement);
+        await navigator.clipboard.writeText(combinedCode);
       } catch {
         setError("Unable to copy to clipboard. Please copy manually.");
       }
@@ -507,34 +510,64 @@ export default function ThreadPanel({
       }
 
       const extras = messageExtras[messageId];
-      const change = extras?.changes?.[0];
-      if (!change) {
+      const changes = extras?.changes || [];
+      if (changes.length === 0) {
         return;
       }
 
-      const start = Number(change.start_line);
-      const end = Number(change.end_line);
-      if (!Number.isInteger(start) || !Number.isInteger(end)) {
+      // Sort changes by start_line descending so we can apply from bottom to top
+      const sortedChanges = [...changes].sort(
+        (a, b) => a.start_line - b.start_line
+      );
+
+      // Find the overall range
+      const overallStart = Math.min(...sortedChanges.map((c) => c.start_line));
+      const overallEnd = Math.max(...sortedChanges.map((c) => c.end_line));
+
+      if (!Number.isInteger(overallStart) || !Number.isInteger(overallEnd)) {
         return;
       }
 
       const lines = (sessionCode || "").split("\n");
-      const safeStart = Math.max(1, start);
-      const safeEnd = Math.max(safeStart, end);
+      const safeStart = Math.max(1, overallStart);
+      const safeEnd = Math.max(safeStart, overallEnd);
       const sliceEnd = Math.min(safeEnd, lines.length);
       const originalSnippet =
         sliceEnd >= safeStart
           ? lines.slice(safeStart - 1, sliceEnd).join("\n")
           : "";
 
+      // Build the modified code by applying all changes to the original
+      let modifiedLines = [...lines];
+      // Apply changes from bottom to top to preserve line numbers
+      const changesDescending = [...sortedChanges].sort(
+        (a, b) => b.start_line - a.start_line
+      );
+      for (const change of changesDescending) {
+        const startIdx = change.start_line - 1;
+        const endIdx = change.end_line;
+        const replacementLines = change.replacement.split("\n");
+        modifiedLines.splice(
+          startIdx,
+          endIdx - startIdx,
+          ...replacementLines
+        );
+      }
+
+      // Extract the modified snippet for the same conceptual range
+      // After modifications, line numbers shift, so show the full modified section
+      const modifiedSnippet = modifiedLines
+        .slice(safeStart - 1, safeStart - 1 + (modifiedLines.length - lines.length) + (sliceEnd - safeStart + 1))
+        .join("\n");
+
       setDiffState({
         messageId,
         originalCode: originalSnippet,
-        modifiedCode: change.replacement,
+        modifiedCode: modifiedSnippet || sortedChanges.map((c) => c.replacement).join("\n"),
         language: toMonacoLanguage(sessionLanguage),
         startLine: safeStart,
         endLine: safeEnd,
-        change,
+        changes: sortedChanges,
       });
     },
     [appliedMessageIds, messageExtras, sessionLanguage, sessionCode]
@@ -545,21 +578,18 @@ export default function ThreadPanel({
   }, []);
 
   const handleApplyPatchFromDiff = useCallback(async () => {
-    if (!diffState?.change || !onApplyPatch || !threadId) {
+    if (!diffState?.changes || diffState.changes.length === 0 || !onApplyPatch || !threadId) {
       return;
     }
 
-    const { change, messageId } = diffState;
+    const { changes, messageId } = diffState;
 
     try {
       setApplyingPatch(true);
       setError("");
 
-      await onApplyPatch({
-        start_line: change.start_line,
-        end_line: change.end_line,
-        replacement: change.replacement,
-      });
+      // Pass all changes at once - Editor.jsx will handle applying them in the correct order
+      await onApplyPatch(changes);
 
       setAppliedMessageIds((prev) => {
         const next = new Set(prev);
@@ -820,7 +850,7 @@ export default function ThreadPanel({
         endLine={diffState?.endLine}
         isApplying={applyingPatch}
         canApply={
-          Boolean(diffState?.change && onApplyPatch) &&
+          Boolean(diffState?.changes?.length && onApplyPatch) &&
           !appliedMessageIds.has(diffState?.messageId || "")
         }
       />
