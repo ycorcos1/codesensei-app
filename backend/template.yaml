@@ -319,6 +319,18 @@ Resources:
             RestApiId: !Ref CodeSenseiApi
             Path: /threads/{thread_id}
             Method: OPTIONS
+        UpdateThreadAnchor:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CodeSenseiApi
+            Path: /threads/{thread_id}/anchor
+            Method: PATCH
+        ThreadsAnchorOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CodeSenseiApi
+            Path: /threads/{thread_id}/anchor
+            Method: OPTIONS
   MessagesFunction:
     Type: AWS::Serverless::Function
     Properties:
