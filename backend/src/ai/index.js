@@ -165,10 +165,9 @@ function extractLocalContext(code, selection) {
   };
 }
 
-function buildSystemPrompt(language, contextMode) {
-  const base = [
+function buildSystemPrompt(language, contextMode, intent) {
+  const common = [
     `You are an expert ${language} code reviewer.`,
-    "Analyze the provided code and deliver concise, actionable feedback.",
     "Respond with ONLY a valid JSON object and nothing else.",
     "{",
     '  "analysis": "plain text explanation with no markdown or code fences",',
@@ -176,20 +175,32 @@ function buildSystemPrompt(language, contextMode) {
     '    { "start_line": number, "end_line": number, "replacement": "string" }',
     "  ]",
     "}",
-    "Guidelines:",
-    "- analysis must be human-readable plain text (no markdown, bullet lists, or code fences).",
-    `- replacement must contain only valid ${language} source code with no surrounding fences, language tags, or narrative commentary.`,
-    "- If no code changes are needed, return an empty changes array [].",
-    "- Line numbers in changes must reference the original file, not the snippet.",
+    "Line numbers must reference the original file, not the snippet.",
+    "analysis must be plain sentences suitable for chat display (no markdown fences, headers, or bullet markers).",
   ];
 
+  if (intent === "explain") {
+    common.push(
+      "The user wants an explanation of the selected code.",
+      "Describe what the code does, key behaviors, and any noteworthy edge cases in analysis.",
+      "Do NOT suggest code changes. Return an empty changes array [].",
+      "If the user explicitly asks for improvements, acknowledge that in analysis but keep changes empty."
+    );
+  } else {
+    common.push(
+      "The user wants to improve the code.",
+      "If improvements are possible, return one or more entries in changes with the exact replacement code.",
+      "If the code is already acceptable, return an empty changes array [] and explain why no changes are needed."
+    );
+  }
+
   if (contextMode === "local") {
-    base.push(
+    common.push(
       "The user only provided a portion of the file. When referencing line numbers, ALWAYS use the original file numbering as communicated in the prompt."
     );
   }
 
-  return base.join("\n");
+  return common.join("\n");
 }
 
 function buildUserPrompt({
@@ -329,7 +340,12 @@ function sanitizeAnalysisText(text) {
     return "";
   }
 
-  let cleaned = text.trim();
+  const original = text.trim();
+  if (!original) {
+    return "";
+  }
+
+  let cleaned = original;
 
   // Remove markdown headers
   cleaned = cleaned.replace(/^#{1,6}\s+/gm, "");
@@ -352,7 +368,8 @@ function sanitizeAnalysisText(text) {
   // Collapse excessive newlines
   cleaned = cleaned.replace(/\n{3,}/g, "\n\n");
 
-  return cleaned.trim();
+  cleaned = cleaned.trim();
+  return cleaned.length > 0 ? cleaned : original;
 }
 
 function sanitizeReplacementCode(code) {
@@ -409,6 +426,9 @@ function parseBedrockResponse(bedrockResponse) {
   }
 
   const analysis = sanitizeAnalysisText(jsonPayload.analysis);
+  if (!analysis.trim()) {
+    throw new Error("AI_MALFORMED_RESPONSE");
+  }
   const changes = jsonPayload.changes.map((change) => {
     if (
       !change ||
@@ -435,7 +455,15 @@ function parseBedrockResponse(bedrockResponse) {
   };
 }
 
-async function callBedrock({ code, prompt, language, selection, history }) {
+async function callBedrock({
+  code,
+  prompt,
+  language,
+  selection,
+  history,
+  mode,
+}) {
+  const intentMode = mode === "explain" ? "explain" : "improve";
   const baselineTokens = estimateTokenCount({ code, prompt, history });
 
   let contextMode = "full";
@@ -464,7 +492,7 @@ async function callBedrock({ code, prompt, language, selection, history }) {
     throw new Error("TOKEN_LIMIT_EXCEEDED");
   }
 
-  const systemPrompt = buildSystemPrompt(language, contextMode);
+  const systemPrompt = buildSystemPrompt(language, contextMode, intentMode);
   const userPrompt = buildUserPrompt({
     code: effectiveCode,
     language,
@@ -481,6 +509,10 @@ async function callBedrock({ code, prompt, language, selection, history }) {
     systemPrompt
   );
   const parsed = parseBedrockResponse(bedrockResponse);
+
+  if (intentMode === "explain" && parsed.changes.length > 0) {
+    throw new Error("AI_MALFORMED_RESPONSE");
+  }
 
   const translatedChanges =
     contextMode === "local"
@@ -516,6 +548,7 @@ async function callBedrock({ code, prompt, language, selection, history }) {
     changes: translatedChanges,
     context_mode: contextMode,
     token_count: inputTokens + outputTokens,
+    intent: intentMode,
   };
 }
 
@@ -585,6 +618,10 @@ async function handleAnalyze(event) {
     );
   }
 
+  const modeRaw = normalizeString(payload.mode);
+  const intent =
+    modeRaw === "explain" || modeRaw === "improve" ? modeRaw : "improve";
+
   let selection;
   try {
     selection = sanitizeSelection(payload.selection);
@@ -651,9 +688,10 @@ async function handleAnalyze(event) {
         language,
         selection,
         history,
+        mode: intent,
       });
 
-      return success(200, response);
+      return success(200, { ...response, intent });
     } catch (err) {
       console.error("[ai] Bedrock call failed:", err);
 

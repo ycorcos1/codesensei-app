@@ -275,6 +275,21 @@ async function handleCreateMessage(event) {
         }
         metadata.applied_from_message_id = payload.metadata.applied_from_message_id;
       }
+
+      if (payload.metadata.intent !== undefined) {
+        if (typeof payload.metadata.intent !== 'string') {
+          throw new Error('INVALID_METADATA_INTENT');
+        }
+        const normalizedIntent = payload.metadata.intent.trim().toLowerCase();
+        if (
+          normalizedIntent !== 'improve' &&
+          normalizedIntent !== 'explain' &&
+          normalizedIntent !== 'info'
+        ) {
+          throw new Error('INVALID_METADATA_INTENT');
+        }
+        metadata.intent = normalizedIntent;
+      }
     }
   } catch (err) {
     switch (err.message) {
@@ -362,6 +377,13 @@ async function handleCreateMessage(event) {
           'INVALID_INPUT',
           'metadata.applied_from_message_id must be a string.',
           'metadata.applied_from_message_id',
+        );
+      case 'INVALID_METADATA_INTENT':
+        return error(
+          400,
+          'INVALID_INPUT',
+          'metadata.intent must be "improve", "explain", or "info".',
+          'metadata.intent',
         );
       default:
         throw err;

@@ -3,6 +3,7 @@ import PropTypes from "prop-types";
 import { useNavigate } from "react-router-dom";
 
 import { api, APIError } from "../utils/api";
+import classifyIntent from "../utils/aiIntent";
 import { useAuth } from "../context/AuthContext";
 import DiffModal from "./DiffModal";
 
@@ -161,10 +162,15 @@ export default function ThreadPanel({
             typeof message.metadata.context_mode === "string"
               ? message.metadata.context_mode
               : null;
+          const intent =
+            typeof message.metadata.intent === "string"
+              ? message.metadata.intent
+              : "improve";
 
           restoredExtras[message.message_id] = {
             changes,
             context_mode: contextMode,
+            intent,
           };
 
           if (
@@ -308,14 +314,22 @@ export default function ThreadPanel({
                 : {}),
             };
 
+      const requestedIntent = classifyIntent(trimmed);
+
       const aiResponse = await api.analyzeCode({
         thread_id: threadId,
         code: effectiveCode,
         language: effectiveLanguage,
         prompt: trimmed,
+        mode: requestedIntent,
         selection: selectionPayload,
         history: historyPayload,
       });
+
+      const intent =
+        typeof aiResponse?.intent === "string"
+          ? aiResponse.intent
+          : requestedIntent;
 
       const analysis =
         typeof aiResponse?.analysis === "string" ? aiResponse.analysis : "";
@@ -349,6 +363,7 @@ export default function ThreadPanel({
           : null;
 
       const metadata = {
+        intent,
         analysis,
         changes: cleanedChanges,
       };
@@ -394,6 +409,7 @@ export default function ThreadPanel({
         next[aiMessage.message_id] = {
           changes: cleanedChanges,
           context_mode: contextMode,
+          intent,
         };
         return next;
       });
@@ -561,6 +577,7 @@ export default function ThreadPanel({
           patch_applied: true,
           applied_from_message_id: messageId,
           changes: [],
+          intent: "info",
         },
       };
 
@@ -578,6 +595,7 @@ export default function ThreadPanel({
           [confirmationMessage.message_id]: {
             changes: [],
             context_mode: null,
+            intent: "info",
           },
         }));
       } catch (confirmErr) {
@@ -678,6 +696,10 @@ export default function ThreadPanel({
                   message.metadata?.applied_from_message_id);
               const contextMode =
                 message.context_mode || extras.context_mode || null;
+              const intent =
+                extras.intent ||
+                message.metadata?.intent ||
+                (changeCount > 0 ? "improve" : "explain");
 
               return (
                 <li
@@ -709,6 +731,9 @@ export default function ThreadPanel({
                       <span className="message-context-badge">
                         Used local context
                       </span>
+                    ) : null}
+                    {intent === "explain" && !hasDiff ? (
+                      <span className="message-applied-badge">Explanation</span>
                     ) : null}
                     {isApplied ? (
                       <span className="message-applied-badge">Patch applied</span>

@@ -198,8 +198,8 @@ export default function Signup() {
     <div className="auth-page">
       <div className="auth-card">
         <div className="auth-card-nav">
-          <Link to="/dashboard" className="auth-back-link">
-            Back to Dashboard
+          <Link to="/" className="auth-back-link">
+            Back to Home
           </Link>
         </div>
         <h1 className="auth-title">Create Account</h1>

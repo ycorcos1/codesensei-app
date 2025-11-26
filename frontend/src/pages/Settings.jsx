@@ -105,7 +105,8 @@ export default function Settings() {
         if (response?.user && isMounted) {
           updateUser(response.user);
         }
-      } catch (err) {
+      } catch (error) {
+        console.error("[settings] Failed to fetch profile:", error);
         if (isMounted) {
           setProfileError((prev) =>
             prev || 'Failed to refresh profile details. Showing cached values.',
